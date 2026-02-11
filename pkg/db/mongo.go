@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	conf "github.com/iceymoss/go-hichat-api/pkg/config"
-	zLog "github.com/iceymoss/go-hichat-api/pkg/logger"
+	conf "github.com/iceymoss/go-task/pkg/config"
+	zLog "github.com/iceymoss/go-task/pkg/logger"
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"

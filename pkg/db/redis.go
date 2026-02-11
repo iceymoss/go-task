@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	conf "github.com/iceymoss/go-hichat-api/pkg/config"
+	conf "github.com/iceymoss/go-task/pkg/config"
 
 	"github.com/go-redis/redis/v8"
 )
