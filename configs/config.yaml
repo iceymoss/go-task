@@ -1,0 +1,14 @@
+server:
+  port: ":9099"
+
+jobs:
+  # 任务1：每日 AI 文章 (带随机延迟)
+  - name: "ai:writer"
+    cron: "0 0 0 * * *"   # 每天凌晨 00:00:00 触发
+    enable: true
+    params:
+      random_delay: true  # 开启代码里的随机休眠逻辑
+      api_key: "${OPENAI_API_KEY}"
+      repo_path: "/Users/yourname/workspace/blog-repo" # 必须是本地真实存在的Git仓库
+      author_name: "AI Bot"
+      author_email: "bot@example.com"
