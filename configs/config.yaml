@@ -2,13 +2,22 @@ server:
   port: ":9099"
 
 jobs:
-  # 任务1：每日 AI 文章 (带随机延迟)
-  - name: "ai:writer"
-    cron: "0 0 0 * * *"   # 每天凌晨 00:00:00 触发
-    enable: true
+  # 任务1：每日 AI 文章 (使用临时克隆模式)
+  - name: "ai:writer"        # 对应 Go 代码中 tasks.Register("ai:writer", ...)
+    cron: "0 0 0 * * *"      # 每天凌晨 0点 触发
+    enable: true             # 开启任务
+
+    # 👇 这里是重点：参数要换成新代码支持的那些
     params:
-      random_delay: true  # 开启代码里的随机休眠逻辑
-      api_key: "${OPENAI_API_KEY}"
-      repo_path: "/Users/yourname/workspace/blog-repo" # 必须是本地真实存在的Git仓库
-      author_name: "AI Bot"
-      author_email: "bot@example.com"
+      # 1. AI 配置
+      api_key: "${OPENAI_API_KEY}"    # 建议从环境变量读取
+      random_delay: true              # 开启随机延迟
+
+      # 2. Git 仓库配置 (新版)
+      remote_url: "git@github.com:iceymoss/inkspace.git"  # 远程 Git 地址 (SSH格式)
+      ssh_key_path: "/root/.ssh/id_rsa"                   # 你的 SSH 私钥绝对路径
+      work_dir: "/tmp/iceymoss_tasks"                     # 临时工作目录，任务结束后会自动清理
+
+      # 3. 提交人信息
+      author_name: "iceymoss"
+      author_email: "ice_moss@163.com"
