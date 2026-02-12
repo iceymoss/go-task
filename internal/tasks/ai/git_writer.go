@@ -1,11 +1,15 @@
 package ai
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -124,9 +128,6 @@ func (t *WriterTask) Run(ctx context.Context, params map[string]any) error {
 		return fmt.Errorf("AI call failed: %w", err)
 	}
 
-	fmt.Println("ai创作标题：", title)
-	fmt.Println("ai创作内容: ", content)
-
 	// 6. 保存文件
 	filename, err := t.saveFile(repoLocalPath, p.AuthorName, title, content)
 	if err != nil {
@@ -140,6 +141,38 @@ func (t *WriterTask) Run(ctx context.Context, params map[string]any) error {
 	}
 
 	rdb.Set(ctx, LastID, article.ID+1, 0)
+
+	// 1. 登录信息
+	username := "ai_bot"
+	password := "admin123"
+
+	// 执行登录获取 Token
+	token, err := login(username, password)
+	if err != nil {
+		logger.Error("登录失败: %v", zap.Error(err))
+		return err
+	}
+	// 调试用，打印部分 token
+	// fmt.Printf("获取到的 Token (前20位): %s...\n", token[:20])
+
+	// 2. 准备要创建的文章数据
+	newArticle := ArticleCreateRequest{
+		Title:       title,
+		Content:     content,
+		Summary:     strings.Join(article.Topics, " "),
+		Cover:       "/uploads/images/2026/02/12/85a5205c-7c4f-49d3-81db-f542b5d7b502.jpg",
+		CategoryID:  23,
+		TagIDs:      []int{},
+		Status:      1,
+		IsTop:       false,
+		IsRecommend: false,
+	}
+
+	// 执行创建文章
+	if err := createArticle(token, newArticle); err != nil {
+		logger.Error("流程终止", zap.Error(err))
+		return err
+	}
 
 	log.Println("✅ [AI Task] Completed successfully.")
 	return nil
@@ -172,7 +205,7 @@ func (t *WriterTask) callAI(ctx context.Context, p WriterParams) (string, string
 要求：
 1. 必须返回严格的 JSON 格式，不要包含 Markdown 代码块标记（如 '''json）。
 2. JSON 格式必须包含两个字段：{"title": "文章标题", "content": "Markdown正文"}。
-3. 内容要有深度，包含代码示例，语气幽默。
+3. 内容要有深度，包含代码示例，严谨，语气根据文章主题定，必须谦虚，不要说大话，记住你叫icey或者iceymoss。
 4. 创作内容必须使用中文。
 5. 只返回 JSON，不要包含其他解释性文字。`, topic)
 
@@ -293,8 +326,6 @@ func parseParams(params map[string]any) WriterParams {
 		return ""
 	}
 
-	fmt.Println("api_key:++++++++++:", getString("api_key"))
-
 	if v := getString("api_key"); v != "" {
 		p.ApiKey = v
 	}
@@ -351,4 +382,169 @@ func doRandomDelay(ctx context.Context) {
 	case <-ctx.Done():
 		log.Println("⚠️ [AI Task] Context cancelled")
 	}
+}
+
+// ==================== 数据结构定义 ====================
+
+// 1. 登录请求参数
+type LoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// 2. 登录响应数据 (只定义我们需要提取的字段)
+type LoginResponseData struct {
+	Token string `json:"token"`
+	// User 字段可以省略，如果我们只需要 token 的话
+}
+
+// 登录接口的完整响应结构
+type LoginResponse struct {
+	Code    int               `json:"code"`
+	Message string            `json:"message"`
+	Data    LoginResponseData `json:"data"`
+}
+
+// 3. 创建文章请求参数
+type ArticleCreateRequest struct {
+	Title       string `json:"title"`
+	Content     string `json:"content"`
+	Summary     string `json:"summary"`
+	Cover       string `json:"cover"`
+	CategoryID  int    `json:"category_id"`
+	TagIDs      []int  `json:"tag_ids"`
+	Status      int    `json:"status"`
+	IsTop       bool   `json:"is_top"`
+	IsRecommend bool   `json:"is_recommend"`
+}
+
+// 4. 通用基础响应 (用于检查创建文章是否成功)
+type BasicResponse struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// ==================== 配置常量 ====================
+
+const (
+	BaseURL        = "http://is.iceymoss.com"
+	LoginEndpoint  = BaseURL + "/api/login"
+	CreateEndpoint = BaseURL + "/api/articles"
+	UserAgent      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36"
+)
+
+// 全局 HTTP 客户端，配置了跳过 TLS 验证 (对应 --insecure)
+var httpClient = &http.Client{
+	Timeout: time.Second * 30,
+	Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	},
+}
+
+// ==================== 核心函数 ====================
+
+// login 执行登录操作并返回 Token
+func login(username, password string) (string, error) {
+	fmt.Println("正在发起登录请求...")
+
+	// 1. 准备请求数据
+	reqBody := LoginRequest{
+		Username: username,
+		Password: password,
+	}
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("序列化登录请求失败: %v", err)
+	}
+
+	// 2. 创建 HTTP 请求
+	req, err := http.NewRequest(http.MethodPost, LoginEndpoint, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return "", fmt.Errorf("创建登录请求失败: %v", err)
+	}
+
+	// 3. 设置必要的请求头
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", UserAgent)
+	// 添加 curl 中其他的 header，虽然不一定是必须的，但为了保持一致性
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Referer", BaseURL+"/login")
+	req.Header.Set("Origin", BaseURL)
+
+	// 4. 发送请求
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("发送登录请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// 5. 读取并解析响应
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取登录响应失败: %v", err)
+	}
+
+	var loginResp LoginResponse
+	if err := json.Unmarshal(respBytes, &loginResp); err != nil {
+		return "", fmt.Errorf("解析登录响应 JSON 失败: %v, 原始内容: %s", err, string(respBytes))
+	}
+
+	// 6. 检查业务状态码
+	if loginResp.Code != 0 {
+		return "", fmt.Errorf("登录失败，API返回错误: [%d] %s", loginResp.Code, loginResp.Message)
+	}
+
+	fmt.Println("登录成功！")
+	return loginResp.Data.Token, nil
+}
+
+// createArticle 使用 Token 创建文章
+func createArticle(token string, article ArticleCreateRequest) error {
+	fmt.Println("\n正在发起创建文章请求...")
+
+	// 1. 准备请求数据
+	jsonBody, err := json.Marshal(article)
+	if err != nil {
+		return fmt.Errorf("序列化文章数据失败: %v", err)
+	}
+
+	// 2. 创建 HTTP 请求
+	req, err := http.NewRequest(http.MethodPost, CreateEndpoint, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return fmt.Errorf("创建文章请求失败: %v", err)
+	}
+
+	// 3. 设置必要的请求头，最重要的是 Authorization
+	// 注意 Bearer 后面的空格
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("Referer", BaseURL+"/dashboard/articles/create")
+
+	// 4. 发送请求
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("发送创建文章请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// 5. 读取并解析响应
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取文章创建响应失败: %v", err)
+	}
+
+	var basicResp BasicResponse
+	if err := json.Unmarshal(respBytes, &basicResp); err != nil {
+		// 如果解析 JSON 失败，打印原始响应体以便调试
+		return fmt.Errorf("解析文章创建响应 JSON 失败: %v, 原始内容: %s", err, string(respBytes))
+	}
+
+	// 6. 检查业务状态码
+	if basicResp.Code != 0 {
+		return fmt.Errorf("创建文章失败，API返回错误: [%d] %s", basicResp.Code, basicResp.Message)
+	}
+
+	fmt.Printf("文章创建成功！响应信息: %s\n", basicResp.Message)
+	return nil
 }
