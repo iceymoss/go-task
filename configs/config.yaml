@@ -1,8 +1,23 @@
 server:
   port: ":9099"
+mysql:         #MySQL config
+  host: '127.0.0.1'
+  port: '3306'
+  database: 'auto_icey'
+  user: 'iceymoss'
+  password: ''
+  log_level: "info"
+redis:
+  host: '127.0.0.1'
+  port: '6379'
+  password: ""
+  db: 0
+  poolSize: 10
 
 jobs:
+  # ==========================================
   # 任务1：每日 AI 文章 (DeepSeek R1 + Git 自动化)
+  # ==========================================
   - name: "ai:writer"
     cron: "0 0 10 * * *"     # 每天上午10点触发
     enable: true
@@ -12,7 +27,7 @@ jobs:
       # 1. DeepSeek / AI 模型配置 (新增部分)
       # ==========================================
       # 注意：这里虽然变量名是 OPENAI_API_KEY，但填的必须是 DeepSeek 的 Key
-      api_key: "sk-99f452b6"
+      api_key: "sk-5d"
 
       # 关键：指定 DeepSeek 的 API 地址
       base_url: "https://api.deepseek.com"
@@ -33,7 +48,7 @@ jobs:
       # ==========================================
       # 3. Git 仓库配置
       # ==========================================
-      remote_url: "git@github.com:iceymoss/go-task.git"
+      remote_url: "git@github.com:iceymoss/iceymoss.github.io.git"
       ssh_key_path: "/root/.ssh/id_rsa"
       work_dir: "/tmp/iceymoss_tasks"
 
@@ -42,3 +57,126 @@ jobs:
       # ==========================================
       author_name: "iceymoss"
       author_email: "ice_moss@163.com"
+
+  # ==========================================
+  # 任务2：全球技术博客爬取与 AI 摘要
+  # ==========================================
+  - name: "ai:tech_summarizer"   # 必须与 Go 代码中的 tasks.Register 名字一致
+    cron: "0 0 9 * * *"               # 每天早上 9:00 执行 (在他更新后不久抓取)
+    enable: true                      # 开启任务
+
+    params:
+      # ------------------------------------------
+      # 1. DeepSeek 配置
+      # ------------------------------------------
+      # 建议复用同一个 Key
+      api_key: "sk-5"
+      base_url: "https://api.deepseek.com"
+
+      # 对于"总结摘要"类任务，DeepSeek-V3 (deepseek-chat) 足够聪明且更便宜、速度更快。
+      # R1 (reasoner) 适合解决复杂数学或逻辑题，用来做总结有点"大材小用"且慢。
+      model: "deepseek-chat"
+
+      # ------------------------------------------
+      # 2. 精选高质量技术 RSS 源
+      # ------------------------------------------
+      sources:
+        # [Go 语言必读]
+        - "https://go.dev/blog/feed.atom"             # Go 官方博客
+        - "https://dave.cheney.net/feed"              # Dave Cheney (Go 核心大神)
+
+        # [AI 与大模型前沿]
+        - "https://openai.com/blog/rss.xml"           # OpenAI 官方
+        - "https://research.google/blog/rss/index.xml" # Google Research
+        - "https://www.anthropic.com/index.xml"       # Anthropic (Claude)
+
+        # [高质量架构与工程]
+        - "https://blog.cloudflare.com/rss/"          # Cloudflare (网络与边缘计算)
+        - "https://netflixtechblog.com/feed"          # Netflix (高并发与微服务)
+        - "https://eng.uber.com/feed/"                # Uber 工程博客
+        - "https://news.ycombinator.com/rss"          # Hacker News (全球最热技术讨论)
+
+        # [国内高质量 (如果有 RSS)]
+        - "https://tech.meituan.com/feed/"            # 美团技术团队 (Java/Go/高并发/算法)
+        - "https://tech.youzan.com/feed/"             # 有赞技术 (非常务实的中间件与架构设计)
+        - "https://blog.qiniu.com/feed.xml"           # 七牛云 (Go语言先行者，云存储/云原生)
+        - "https://dbaplus.cn/rss.php"                # DBAplus (数据库/大数据/运维深水区)
+
+        # [国内个人/社区硬核源 (Go/K8s方向)]
+        - "https://draveness.me/feed.xml"             # 面向信仰编程 (国内Go与K8s源码分析的天花板，必读)
+        - "https://coolshell.cn/feed"                 # 酷壳 CoolShell (陈皓前辈，计算机基础与架构观念)
+        - "https://talkgo.org/index.xml"              # Go夜读 (高质量Go源码阅读社区)
+        - "https://www.lixueduan.com/index.xml"       # 李文周/Go程序员 (Go语言实战)
+        - "https://mojotv.cn/atom.xml"                # 也就是 Go 语言进阶 (很多 Go 编译器/运行时深度文章)
+
+        # ------------------------------------------
+        # [Rust 生态]
+        # ------------------------------------------
+        - "https://blog.rust-lang.org/feed.xml"       # Rust 官方 (发布日志与未来计划)
+        - "https://this-week-in-rust.org/rss.xml"     # This Week in Rust (社区精华周报，必读)
+        - "https://fasterthanli.me/index.xml"         # Amos (Rust 界最硬核的底层深度长文，AI 总结神器)
+
+        # ------------------------------------------
+        # [Python & AI Engineering]
+        # ------------------------------------------
+        - "https://pythoninsider.blogspot.com/atom.xml" # Python 核心开发组博客
+        - "https://realpython.com/atom.xml"           # Real Python (高质量实战教程)
+        - "https://huggingface.co/blog/feed.xml"      # Hugging Face (AI 模型与工程落地最前沿)
+
+        # ------------------------------------------
+        # [Java & JVM 生态]
+        # ------------------------------------------
+        - "https://inside.java/feed.xml"              # Oracle Java 官方团队 (JDK 新特性深度解析)
+        - "https://spring.io/blog.atom"               # Spring 官方 (Java 后端事实标准)
+        - "https://netty.io/feed.xml"                 # Netty (高性能网络编程基石)
+
+        # ------------------------------------------
+        # [Node.js & 前端工程化]
+        # ------------------------------------------
+        - "https://nodejs.org/en/feed/blog.xml"       # Node.js 官方
+        - "https://v8.dev/blog.atom"                  # V8 引擎团队 (深入理解 JS/Node 运行时)
+        - "https://deno.com/feed"                     # Deno (Ryan Dahl 的新作品，关注现代运行时)
+
+        # ------------------------------------------
+        # [云原生: K8s & Docker]
+        # ------------------------------------------
+        - "https://kubernetes.io/feed.xml"            # Kubernetes 官方博客
+        - "https://www.docker.com/blog/feed/"         # Docker 官方
+        - "https://istio.io/latest/blog/feed.xml"     # Istio (Service Mesh 领域标准)
+        - "https://etcd.io/blog/index.xml"            # etcd (分布式存储，K8s 的心脏)
+
+        # ------------------------------------------
+        # [主流数据库 (Database)]
+        # ------------------------------------------
+        - "https://mysqlserverteam.com/feed/"         # MySQL 核心开发团队
+        - "https://www.crunchydata.com/blog/rss.xml"  # Crunchy Data (PostgreSQL 领域最权威的技术博客)
+        - "https://redis.io/feed"                     # Redis 官方
+        - "https://www.elastic.co/blog/feed"          # Elasticsearch (搜索与大数据)
+        - "https://pingcap.com/zh/blog/rss.xml"       # PingCAP (TiDB, 国产数据库之光，文章质量极高)
+
+        # ------------------------------------------
+        # [区块链 & Web3 (只关注技术与原理)]
+        # ------------------------------------------
+        - "https://vitalik.ca/feed.xml"               # Vitalik Buterin (V神博客，区块链哲理与数学的巅峰，必读)
+        - "https://blog.ethereum.org/feed.xml"        # 以太坊基金会 (协议升级与核心研发)
+        - "https://bitcoinops.org/feed.xml"           # Bitcoin Optech (比特币技术升级与软分叉研究)
+        - "https://a16zcrypto.com/feed/"              # a16z Crypto (顶级风投的技术趋势分析)
+        - "https://blog.chain.link/rss/"              # Chainlink (预言机与跨链技术)
+
+        # ------------------------------------------
+        # [币圈/Web3：权威资讯与深度研报]
+        # ------------------------------------------
+        # 1. 顶流媒体 (只看这两家就够了，其他的噪音太大)
+        - "https://www.coindesk.com/arc/outboundfeeds/rss/"  # CoinDesk (币圈的"纽约时报"，新闻最快最准)
+        - "https://cointelegraph.com/rss"                    # CoinTelegraph (覆盖面广，图表丰富)
+        - "https://decrypt.co/feed"                            # Decrypt (更关注 Web3 文化与技术落地，且有很好的 AI 版块)
+
+        # 2. 深度研报与机构观点 (这是最值钱的部分)
+        - "https://www.theblock.co/rss"                        # The Block (数据驱动的新闻，非常严谨)
+        - "https://messari.io/rss"                             # Messari (顶级的加密数据分析机构，研报质量极高)
+        - "https://bankless.substack.com/feed"                 # Bankless (DeFi 领域的圣经，关注以太坊生态)
+
+        # 3. 中文优质源 (需谨慎，很多中文媒体充斥软文)
+        - "https://foresightnews.pro/rss"                      # Foresight News (目前中文区质量较高、更新较快的聚合媒体)
+        - "https://www.panewslab.com/zh/rss.xml"               # PA News (老牌，内容相对客观)
+        # 注意：吴说区块链 (Wu Blockchain) 质量极高但没有原生 RSS，通常需要 twitter 爬虫，这里暂不列入

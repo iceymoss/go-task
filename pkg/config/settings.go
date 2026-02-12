@@ -1,11 +1,5 @@
 package config
 
-import (
-	"fmt"
-
-	"github.com/spf13/viper"
-)
-
 var ServiceConf *ServiceConfig
 
 type RedisConfig struct {
@@ -73,43 +67,4 @@ type SMSVerificationConfig struct {
 type EmailVerificationConfig struct {
 	Provider string            `mapstructure:"provider" json:"provider"` // 服务商：smtp/sendgrid
 	Config   map[string]string `mapstructure:"config" json:"config"`     // 服务商特定配置
-}
-
-func InitConfig(dev string, serveType string, configPath string) {
-	//Instantiating an object
-	v := viper.New()
-
-	configFile := ""
-	if serveType == "task" {
-		configFile = "../../config/config-pro.yaml"
-		if dev == "debug" {
-			configFile = "../../config/config-dev.yaml"
-		} else if dev == "local" {
-			configFile = "../../config/config-local.yaml"
-		}
-	} else {
-		configFile = "../config/config-pro.yaml"
-		if dev == "debug" {
-			configFile = "../config/config-dev.yaml"
-		} else if dev == "local" {
-			configFile = "../config/config-local.yaml"
-		}
-	}
-
-	if configPath != "" {
-		configFile = fmt.Sprintf("%s/config-%s.yaml", configPath, dev)
-	}
-
-	//Reading Configuration Files
-	v.SetConfigFile(configFile)
-
-	//Reading in a file
-	if err := v.ReadInConfig(); err != nil {
-		panic(err)
-	}
-
-	//How to use the ServerConf object in other files - global variables
-	if err := v.Unmarshal(&ServiceConf); err != nil {
-		panic(err)
-	}
 }

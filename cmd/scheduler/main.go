@@ -8,7 +8,7 @@ import (
 	"github.com/iceymoss/go-task/web"
 	// import anonymously to register tasks to the list
 	_ "github.com/iceymoss/go-task/internal/tasks/ai"
-	_ "github.com/iceymoss/go-task/internal/tasks/network"
+	//_ "github.com/iceymoss/go-task/internal/tasks/network"
 	"github.com/iceymoss/go-task/pkg/logger"
 
 	"github.com/joho/godotenv"

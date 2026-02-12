@@ -18,7 +18,7 @@ import (
 	"gorm.io/gorm/utils"
 )
 
-const MYSQL_DB_GO_TASK = "go-task"
+const MYSQL_DB_GO_TASK = "auto_icey"
 
 var logger *zap.Logger
 
