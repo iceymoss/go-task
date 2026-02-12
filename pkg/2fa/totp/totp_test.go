@@ -2,12 +2,14 @@ package totp_test
 
 import (
 	"fmt"
-	"github.com/iceymoss/go-task/pkg/2fa/totp"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/iceymoss/go-task/pkg/2fa/totp"
+
 	"github.com/stretchr/testify/assert"
+
 	"github.com/stretchr/testify/require"
 )
 
