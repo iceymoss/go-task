@@ -118,6 +118,7 @@ func (t *TechSummarizerTask) Run(ctx context.Context, params map[string]any) err
 				Source:      feed.Title,
 				CreatedAt:   now,
 				UpdatedAt:   now,
+				PublishedParsed: now,
 			}
 			if err := dbConn.Create(article).Error; err != nil {
 				log.Printf("❌ [Crawler] DB Save failed: %v", err)
