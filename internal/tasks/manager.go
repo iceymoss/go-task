@@ -17,7 +17,6 @@ func ApplyAutoJobs(sched Scheduler) {
 	mu.RLock()
 	defer mu.RUnlock()
 
-	fmt.Println("自动任务列表：", autoJobs)
 	for _, job := range autoJobs {
 		fmt.Println("注册自动任务中：", job.Name)
 		// 调用调度器添加任务
