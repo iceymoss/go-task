@@ -211,14 +211,14 @@ type RateLimiter interface {
 // SimpleRateLimiter 简单的令牌桶限流器
 type SimpleRateLimiter struct {
 	maxConcurrent int32
-	current      int32
+	current       int32
 }
 
 // NewSimpleRateLimiter 创建简单限流器
 func NewSimpleRateLimiter(maxConcurrent int) *SimpleRateLimiter {
 	return &SimpleRateLimiter{
 		maxConcurrent: int32(maxConcurrent),
-		current:      0,
+		current:       0,
 	}
 }
 
@@ -248,8 +248,8 @@ func RateLimit(limiter RateLimiter) JobWrapper {
 	}
 }
 
-// CircuitBreaker 熔断器包装器
-type CircuitBreaker interface {
+// CircuitBreakerPolicy 熔断器策略接口
+type CircuitBreakerPolicy interface {
 	Allow() bool
 	RecordSuccess()
 	RecordFailure()
@@ -257,9 +257,9 @@ type CircuitBreaker interface {
 
 // SimpleCircuitBreaker 简单的熔断器
 type SimpleCircuitBreaker struct {
-	maxFailures    int
-	failureCount   int32
-	state          int32 // 0: closed, 1: open, 2: half-open
+	maxFailures  int
+	failureCount int32
+	state        int32 // 0: closed, 1: open, 2: half-open
 }
 
 func NewSimpleCircuitBreaker(maxFailures int) *SimpleCircuitBreaker {
@@ -290,7 +290,7 @@ func (cb *SimpleCircuitBreaker) RecordFailure() {
 }
 
 // CircuitBreaker 熔断器包装器
-func CircuitBreaker(breaker CircuitBreaker) JobWrapper {
+func CircuitBreaker(breaker CircuitBreakerPolicy) JobWrapper {
 	return func(next JobFunc) JobFunc {
 		return func(ctx context.Context) error {
 			if !breaker.Allow() {

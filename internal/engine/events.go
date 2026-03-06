@@ -24,11 +24,11 @@ const (
 
 // Event 任务事件
 type Event struct {
-	Type      EventType   // 事件类型
-	TaskName string       // 任务名称
-	TimeStamp time.Time   // 时间戳
+	Type      EventType // 事件类型
+	TaskName  string    // 任务名称
+	TimeStamp time.Time // 时间戳
 	Context   context.Context
-	Error     error       // 错误信息（如果有）
+	Error     error          // 错误信息（如果有）
 	Data      map[string]any // 附加数据
 }
 
@@ -165,9 +165,9 @@ func MetricsEventHandler() EventHandlerFunc {
 
 // AlertEventHandler 发送告警通知
 type AlertConfig struct {
-	Enabled  bool
-	OnErrors bool
-	OnRetries bool
+	Enabled    bool
+	OnErrors   bool
+	OnRetries  bool
 	MaxRetries int
 }
 
@@ -283,11 +283,16 @@ func DependencyEventHandler(dependencyManager *DependencyManager) EventHandlerFu
 						TaskName:  dep,
 						TimeStamp: time.Now(),
 						Data: map[string]any{
-							"dependency_name": event.TaskName,
+							"dependency_name":    event.TaskName,
 							"dependency_success": success,
 						},
 					}
-					// 注意：这里需要传入EventManager实例
+
+					// 通过全局 EventManager 发射事件
+					if em := GetGlobalEventManager(); em != nil {
+						em.Emit(dependencyEvent)
+					}
+
 					logger.Info("✅ [Event] Dependency satisfied",
 						zap.String("task", dep),
 						zap.String("dependency", event.TaskName),
