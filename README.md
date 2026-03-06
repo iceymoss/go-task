@@ -249,6 +249,81 @@ Please check https://github.com/gin-gonic/gin/blob/master/docs/doc.md#dont-trust
 
 ---
 
+## 🧩 多实例部署 & Redis 分布式调度 (Distributed Scheduling)
+
+在生产环境中，你通常会以 **多实例 / 多副本** 的方式部署 `go-task`（例如 Kubernetes 中的多个 Pod）。  
+为了避免同一个 Cron 任务在多个实例上被重复执行，`go-task` 内置了基于 **Redis 锁的 Leader 选举机制**：
+
+- 所有实例都会连接到同一个 Redis；
+- 只有拿到 Leader 锁的实例会真正启动内部的 `cron` 调度器并执行任务；
+- Leader 挂掉或网络中断后，锁会因为 TTL 过期而自动释放，其他实例会参与选举并接管任务。
+
+### 1. 环境准备
+
+- 确保 `configs/config.yaml` 中已经配置了可用的 Redis：
+
+```yaml
+redis:
+  host: "127.0.0.1"
+  port: "6379"
+  password: ""
+  db: 0
+  poolSize: 10
+```
+
+> 在 Kubernetes / Docker 环境中，`host` 填集群内可访问的 Redis 服务地址即可。
+
+### 2. 内核是如何工作的？
+
+- 在 `internal/server/server.go` 中，`NewServer` 会为调度器显式启用 Redis 选主：
+
+```go
+scheduler := engine.NewScheduler()
+
+// 所有实例都会连到同一个 Redis，抢占同一把锁
+// 只有 Leader 会真正启动 cron 调度。
+scheduler.EnableRedisLeaderElection("go-task:scheduler:leader", 15*time.Second, 5*time.Second)
+```
+
+- 关键行为：
+  - 锁 key：`go-task:scheduler:leader`（可按需修改）；
+  - TTL：15 秒（Leader 挂掉约 15 秒内会被其他实例接管）；
+  - 续约间隔：5 秒（Leader 会定期刷新锁的过期时间）。
+
+### 3. 多实例部署示例
+
+只需要 **启动多个完全相同的实例** 即可自动实现分布式调度，例如本地直接起两个进程（模拟两台机器）：
+
+```shell
+go run cmd/scheduler/main.go &
+go run cmd/scheduler/main.go &
+```
+
+查看日志时你会看到类似输出：
+
+- 某个实例打印：`👑 [Scheduler] This instance became leader, starting cron`
+- 其他实例不会执行定时任务，只会提供 HTTP API 和 Dashboard。
+
+在 Kubernetes 中，你只需要把 Deployment 的 `replicas` 设置为大于 1，所有 Pod 会自动通过 Redis 完成选主：
+
+```yaml
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+        - name: go-task
+          image: your-registry/go-task:latest
+          env:
+            - name: REDIS_HOST
+              value: "redis.default.svc.cluster.local"
+```
+
+> 注意：目前 Redis 选主是 **单 Leader 调度模型**，不会做任务分片；  
+> 所有 Cron 任务仍然由 Leader 实例串行调度，但可以通过任务内部并发、任务队列和优先级来提升吞吐。
+
+---
+
 ## 📁 项目结构 (Project Layout)
 
 遵循 **Standard Go Project Layout** 规范：

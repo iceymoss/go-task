@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/iceymoss/go-task/internal/conf"
 	"github.com/iceymoss/go-task/internal/engine"
@@ -23,6 +24,10 @@ func NewServer(cfg *conf.Config, staticFS fs.FS) *Server {
 	scheduler := engine.NewScheduler()
 
 	tasks.ApplyAutoJobs(scheduler)
+
+	// 启用基于 Redis 的分布式选主（多实例部署时，只有 Leader 会真正执行定时任务）
+	// key 可以根据业务环境自定义
+	scheduler.EnableRedisLeaderElection("go-task:scheduler:leader", 15*time.Second, 5*time.Second)
 
 	// 注册所有配置型任务
 	for _, job := range cfg.Jobs {
