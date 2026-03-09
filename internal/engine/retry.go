@@ -9,27 +9,28 @@ import (
 	"time"
 
 	"github.com/iceymoss/go-task/pkg/logger"
+
 	"go.uber.org/zap"
 )
 
 // RetryPolicy 重试策略
 type RetryPolicy struct {
-	MaxAttempts        int           // 最大重试次数
-	InitialDelay       time.Duration // 初始延迟
+	MaxAttempts       int           // 最大重试次数
+	InitialDelay      time.Duration // 初始延迟
 	MaxDelay          time.Duration // 最大延迟
 	BackoffMultiplier float64       // 退避乘数
-	JitterEnabled      bool          // 是否启用随机抖动
+	JitterEnabled     bool          // 是否启用随机抖动
 	RetryableErrors   []error       // 可重试的错误列表
 }
 
 // DefaultRetryPolicy 默认重试策略
 func DefaultRetryPolicy() *RetryPolicy {
 	return &RetryPolicy{
-		MaxAttempts:        3,
-		InitialDelay:       1 * time.Second,
+		MaxAttempts:       3,
+		InitialDelay:      1 * time.Second,
 		MaxDelay:          30 * time.Second,
 		BackoffMultiplier: 2.0,
-		JitterEnabled:      true,
+		JitterEnabled:     true,
 		RetryableErrors:   nil,
 	}
 }
@@ -190,44 +191,44 @@ func (rm *RetryManager) getMaxAttempts(taskName string) int {
 // ExponentialBackoffPolicy 指数退避策略
 func ExponentialBackoffPolicy(maxAttempts int, initialDelay time.Duration) *RetryPolicy {
 	return &RetryPolicy{
-		MaxAttempts:        maxAttempts,
-		InitialDelay:       initialDelay,
+		MaxAttempts:       maxAttempts,
+		InitialDelay:      initialDelay,
 		MaxDelay:          30 * time.Minute,
 		BackoffMultiplier: 2.0,
-		JitterEnabled:      true,
+		JitterEnabled:     true,
 	}
 }
 
 // LinearBackoffPolicy 线性退避策略
 func LinearBackoffPolicy(maxAttempts int, delay time.Duration) *RetryPolicy {
 	return &RetryPolicy{
-		MaxAttempts:        maxAttempts,
-		InitialDelay:       delay,
+		MaxAttempts:       maxAttempts,
+		InitialDelay:      delay,
 		MaxDelay:          time.Duration(maxAttempts) * delay,
 		BackoffMultiplier: 1.0,
-		JitterEnabled:      true,
+		JitterEnabled:     true,
 	}
 }
 
 // FixedDelayPolicy 固定延迟策略
 func FixedDelayPolicy(maxAttempts int, delay time.Duration) *RetryPolicy {
 	return &RetryPolicy{
-		MaxAttempts:        maxAttempts,
-		InitialDelay:       delay,
+		MaxAttempts:       maxAttempts,
+		InitialDelay:      delay,
 		MaxDelay:          delay,
 		BackoffMultiplier: 1.0,
-		JitterEnabled:      false,
+		JitterEnabled:     false,
 	}
 }
 
 // NoRetryPolicy 不重试策略
 func NoRetryPolicy() *RetryPolicy {
 	return &RetryPolicy{
-		MaxAttempts:        1,
-		InitialDelay:       0,
+		MaxAttempts:       1,
+		InitialDelay:      0,
 		MaxDelay:          0,
 		BackoffMultiplier: 1.0,
-		JitterEnabled:      false,
+		JitterEnabled:     false,
 	}
 }
 
@@ -246,7 +247,7 @@ func RetryWithPolicy(retryManager *RetryManager, taskName string) JobWrapper {
 
 var (
 	globalEventManager *EventManager
-	eventManagerOnce sync.Once
+	eventManagerOnce   sync.Once
 )
 
 // SetGlobalEventManager 设置全局事件管理器

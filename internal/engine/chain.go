@@ -203,7 +203,7 @@ func Metrics(taskName string) JobWrapper {
 	}
 }
 
-// RateLimit 限流包装器
+// RateLimiter 限流包装器
 type RateLimiter interface {
 	Allow() bool
 }
