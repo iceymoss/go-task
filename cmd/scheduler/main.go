@@ -37,4 +37,5 @@ func main() {
 	if err := srv.Run(port); err != nil {
 		logger.Fatal("❌ Server error", zap.Error(err))
 	}
+
 }
