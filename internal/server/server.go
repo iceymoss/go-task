@@ -13,6 +13,7 @@ import (
 	"github.com/iceymoss/go-task/pkg/auth"
 	"github.com/iceymoss/go-task/pkg/constants"
 	"github.com/iceymoss/go-task/pkg/db/models"
+	joblogmodels "github.com/iceymoss/go-task/pkg/db/objects"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/mysql"
@@ -25,6 +26,7 @@ type Server struct {
 	db          *gorm.DB
 	authHandler *AuthHandler
 	jwtService  *auth.JWTService
+	jobHandler  *JobHandler
 }
 
 func NewServer(cfg *conf.Config, staticFS fs.FS) *Server {
@@ -36,14 +38,20 @@ func NewServer(cfg *conf.Config, staticFS fs.FS) *Server {
 	}
 
 	// 自动迁移
-	if err := db.AutoMigrate(&models.User{}, &models.Session{}); err != nil {
+	if err := db.AutoMigrate(&models.User{}, &models.Session{}, &models.Job{}, &joblogmodels.SysJobLog{}); err != nil {
 		log.Printf("⚠️ Failed to migrate database: %v", err)
 	}
 
 	// 创建认证处理器
 	authHandler := NewAuthHandler(db, cfg)
 
+	// 创建任务处理器
+	jobHandler := NewJobHandler(db, nil) // scheduler 稍后设置
+
 	scheduler := engine.NewScheduler()
+
+	// 设置 jobHandler 的 scheduler
+	jobHandler.scheduler = scheduler
 
 	tasks.ApplyAutoJobs(scheduler)
 
@@ -95,6 +103,21 @@ func NewServer(cfg *conf.Config, staticFS fs.FS) *Server {
 			c.JSON(200, gin.H{"message": "Triggered"})
 		})
 
+		// 任务管理 API
+		api.GET("/jobs", jobHandler.GetJobs)
+		api.GET("/jobs/:id", jobHandler.GetJob)
+		api.POST("/jobs", jobHandler.CreateJob)
+		api.PUT("/jobs/:id", jobHandler.UpdateJob)
+		api.DELETE("/jobs/:id", jobHandler.DeleteJob)
+		api.POST("/jobs/:id/enable", jobHandler.EnableJob)
+		api.POST("/jobs/:id/disable", jobHandler.DisableJob)
+		api.POST("/jobs/:id/test", jobHandler.TestJob)
+		api.GET("/jobs/:id/logs", jobHandler.GetJobLogs)
+		api.POST("/jobs/validate-cron", jobHandler.ValidateCron)
+		api.GET("/jobs/templates", jobHandler.GetJobTemplates)
+		api.POST("/jobs/from-template", jobHandler.CreateFromTemplate)
+		api.GET("/jobs/dependency-graph", jobHandler.GetDependencyGraph)
+
 		// 仪表盘统计数据
 		api.GET("/dashboard/stats", func(c *gin.Context) {
 			stats := scheduler.Stats.GetAll()
@@ -141,6 +164,7 @@ func NewServer(cfg *conf.Config, staticFS fs.FS) *Server {
 		db:          db,
 		authHandler: authHandler,
 		jwtService:  authHandler.jwtService,
+		jobHandler:  jobHandler,
 	}
 }
 

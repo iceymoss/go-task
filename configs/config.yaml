@@ -4,8 +4,8 @@ mysql:         #MySQL config
   host: '127.0.0.1'
   port: '3306'
   database: 'auto_icey'
-  user: 'iceymoss'
-  password: ''
+  user: 'root'
+  password: '123456789'
   log_level: "info"
 redis:
   host: '127.0.0.1'

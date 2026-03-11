@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>任务管理 - Go-Task 任务调度平台</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f4f6f8;
+            color: #333;
+        }
+
+        .header {
+            background: #fff;
+            padding: 16px 32px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            color: #333;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 24px;
+        }
+
+        .nav-links a {
+            color: #666;
+            text-decoration: none;
+            font-size: 14px;
+            transition: color 0.2s;
+        }
+
+        .nav-links a:hover,
+        .nav-links a.active {
+            color: #007bff;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .user-info span {
+            color: #666;
+        }
+
+        .logout-btn {
+            background: #dc3545;
+            color: #fff;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .logout-btn:hover {
+            background: #c82333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 32px auto;
+            padding: 0 32px;
+        }
+
+        .toolbar {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .toolbar-left {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .toolbar-right {
+            display: flex;
+            gap: 12px;
+        }
+
+        .search-box {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .search-box input {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            min-width: 200px;
+        }
+
+        .search-box input:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+
+        .filter-select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            background: #fff;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #007bff;
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: #fff;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: #fff;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: #fff;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .btn-sm {
+            padding: 4px 8px;
+            font-size: 12px;
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .table-container {
+            background: #fff;
+            padding: 24px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .table-container h3 {
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 16px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+        }
+
+        th {
+            background-color: #f8f9fa;
+            color: #666;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-enabled {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-disabled {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .task-status-running {
+            color: #007bff;
+            font-weight: bold;
+        }
+
+        .task-status-idle {
+            color: #6c757d;
+        }
+
+        .task-status-error {
+            color: #dc3545;
+            font-weight: bold;
+        }
+
+        .task-status-waiting {
+            color: #ffc107;
+            font-weight: bold;
+        }
+
+        .type-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            background: #e2e3e5;
+            color: #495057;
+        }
+
+        .cron-expr {
+            font-family: monospace;
+            background: #f8f9fa;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+
+        .tag {
+            display: inline-block;
+            padding: 2px 6px;
+            background: #e7f3ff;
+            color: #0056b3;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-right: 4px;
+        }
+
+        /* Modal 样式 */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+
+        .modal.show {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background: #fff;
+            padding: 24px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            width: 90%;
+            max-width: 800px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-header h2 {
+            font-size: 20px;
+            color: #333;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+        }
+
+        .close-btn:hover {
+            color: #333;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 600;
+            font-size: 14px;
+            color: #333;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .form-hint {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            margin-top: 24px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+
+        .empty-state h3 {
+            font-size: 18px;
+            margin-bottom: 8px;
+            color: #666;
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 12px;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+
+        .pagination button {
+            padding: 6px 12px;
+            border: 1px solid #ddd;
+            background: #fff;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .pagination button:hover:not(:disabled) {
+            background: #f8f9fa;
+        }
+
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .pagination .page-info {
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚀 Go-Task 任务调度平台</h1>
+        <nav class="nav-links">
+            <a href="/index.html">仪表盘</a>
+            <a href="/jobs.html" class="active">任务管理</a>
+        </nav>
+        <div class="user-info">
+            <span id="welcomeMessage">欢迎, 加载中...</span>
+            <button class="logout-btn" onclick="logout()">退出登录</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- 工具栏 -->
+        <div class="toolbar">
+            <div class="toolbar-left">
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="搜索任务名称..." onkeyup="handleSearch(event)">
+                </div>
+                <select class="filter-select" id="typeFilter" onchange="loadJobs()">
+                    <option value="">所有类型</option>
+                    <option value="shell">Shell</option>
+                    <option value="http">HTTP</option>
+                    <option value="email">Email</option>
+                    <option value="sql">SQL</option>
+                    <option value="custom">Custom</option>
+                </select>
+                <select class="filter-select" id="enableFilter" onchange="loadJobs()">
+                    <option value="">所有状态</option>
+                    <option value="true">已启用</option>
+                    <option value="false">已禁用</option>
+                </select>
+            </div>
+            <div class="toolbar-right">
+                <button class="btn btn-success" onclick="showCreateFromTemplate()">从模板创建</button>
+                <button class="btn btn-primary" onclick="showCreateModal()">新建任务</button>
+            </div>
+        </div>
+
+        <!-- 任务列表 -->
+        <div class="table-container">
+            <h3>任务列表</h3>
+            <table id="jobsTable">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>任务名称</th>
+                        <th>显示名称</th>
+                        <th>类型</th>
+                        <th>Cron 表达式</th>
+                        <th>状态</th>
+                        <th>运行状态</th>
+                        <th>上次运行</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="jobsList">
+                    <tr>
+                        <td colspan="9" class="empty-state">加载中...</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="pagination" id="pagination" style="display: none;">
+                <button onclick="prevPage()" id="prevBtn">上一页</button>
+                <span class="page-info" id="pageInfo">第 1 页</span>
+                <button onclick="nextPage()" id="nextBtn">下一页</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 创建/编辑任务模态框 -->
+    <div class="modal" id="jobModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">新建任务</h2>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <form id="jobForm" onsubmit="saveJob(event)">
+                <input type="hidden" id="jobId">
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="jobName">任务名称 *</label>
+                        <input type="text" id="jobName" required placeholder="唯一标识，如: daily_backup">
+                        <div class="form-hint">只能包含字母、数字、下划线和短横线</div>
+                    </div>
+                    <div class="form-group">
+                        <label for="displayName">显示名称 *</label>
+                        <input type="text" id="displayName" required placeholder="如: 每日备份">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="jobType">任务类型 *</label>
+                        <select id="jobType" required onchange="handleTypeChange()">
+                            <option value="">请选择</option>
+                            <option value="shell">Shell 命令</option>
+                            <option value="http">HTTP 请求</option>
+                            <option value="email">邮件发送</option>
+                            <option value="sql">SQL 查询</option>
+                            <option value="custom">自定义任务</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="cronExpr">Cron 表达式 *</label>
+                        <input type="text" id="cronExpr" required placeholder="如: 0 2 * * *">
+                        <div class="form-hint" id="cronHint"></div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="jobParams">任务参数 (JSON)</label>
+                    <textarea id="jobParams" rows="8" placeholder='{"key": "value"}'></textarea>
+                    <div class="form-hint">根据任务类型配置相应参数</div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="priority">优先级</label>
+                        <input type="number" id="priority" value="0" min="0" max="100">
+                        <div class="form-hint">数值越大优先级越高</div>
+                    </div>
+                    <div class="form-group">
+                        <label for="timeout">超时时间（秒）</label>
+                        <input type="number" id="timeout" value="3600" min="1">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="maxRetries">最大重试次数</label>
+                        <input type="number" id="maxRetries" value="3" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label for="enable">启用状态</label>
+                        <select id="enable">
+                            <option value="true">启用</option>
+                            <option value="false">禁用</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="description">描述</label>
+                    <textarea id="description" rows="2" placeholder="任务描述"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="tags">标签（逗号分隔）</label>
+                    <input type="text" id="tags" placeholder="如: backup,daily">
+                </div>
+
+                <div class="form-group">
+                    <label for="dependencies">依赖任务（逗号分隔）</label>
+                    <input type="text" id="dependencies" placeholder="如: task1,task2">
+                    <div class="form-hint">这些任务执行成功后才会执行当前任务</div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="validateCron()">验证 Cron</button>
+                    <button type="submit" class="btn btn-success">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 从模板创建模态框 -->
+    <div class="modal" id="templateModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>从模板创建任务</h2>
+                <button class="close-btn" onclick="closeTemplateModal()">&times;</button>
+            </div>
+            <div class="form-group">
+                <label for="templateSelect">选择模板</label>
+                <select id="templateSelect" onchange="loadTemplateVariables()">
+                    <option value="">请选择模板</option>
+                </select>
+            </div>
+            <div id="templateVariables"></div>
+            <div class="form-group">
+                <label for="templateJobName">任务名称 *</label>
+                <input type="text" id="templateJobName" required placeholder="如: my_backup">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeTemplateModal()">取消</button>
+                <button type="button" class="btn btn-success" onclick="createFromTemplate()">创建</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let currentPage = 1;
+        const pageSize = 10;
+        let allJobs = [];
+        let filteredJobs = [];
+
+        // 检查是否已登录
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = '/login.html';
+        }
+
+        // 显示用户信息
+        function loadUserInfo() {
+            const user = JSON.parse(localStorage.getItem('user') || '{}');
+            document.getElementById('welcomeMessage').textContent = `欢迎, ${user.username || '用户'}`;
+        }
+
+        // 登出
+        function logout() {
+            const token = localStorage.getItem('token');
+            if (token) {
+                fetch('/api/auth/logout', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                }).catch(() => { });
+            }
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            window.location.href = '/login.html';
+        }
+
+        // API 请求包装器
+        async function apiRequest(url, options = {}) {
+            const token = localStorage.getItem('token');
+            const defaultOptions = {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                }
+            };
+            const response = await fetch(url, { ...defaultOptions, ...options });
+
+            if (response.status === 401) {
+                logout();
+                throw new Error('未授权');
+            }
+
+            return response;
+        }
+
+        // 加载任务列表
+        async function loadJobs() {
+            try {
+                const typeFilter = document.getElementById('typeFilter').value;
+                const enableFilter = document.getElementById('enableFilter').value;
+                
+                let url = '/api/jobs';
+                const params = [];
+                if (typeFilter) params.push(`type=${typeFilter}`);
+                if (enableFilter) params.push(`enable=${enableFilter}`);
+                if (params.length > 0) url += '?' + params.join('&');
+
+                const response = await apiRequest(url);
+                const result = await response.json();
+                
+                allJobs = result.data || [];
+                applyFilters();
+            } catch (error) {
+                console.error('加载任务失败:', error);
+                document.getElementById('jobsList').innerHTML = `
+                    <tr><td colspan="9" class="empty-state">加载失败: ${error.message}</td></tr>
+                `;
+            }
+        }
+
+        // 应用搜索过滤
+        function applyFilters() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            filteredJobs = allJobs.filter(job => {
+                return job.name.toLowerCase().includes(searchTerm) ||
+                       job.display_name.toLowerCase().includes(searchTerm);
+            });
+            currentPage = 1;
+            renderJobs();
+        }
+
+        // 处理搜索
+        function handleSearch(event) {
+            if (event.key === 'Enter') {
+                applyFilters();
+            }
+        }
+
+        // 渲染任务列表
+        function renderJobs() {
+            const start = (currentPage - 1) * pageSize;
+            const end = start + pageSize;
+            const pageJobs = filteredJobs.slice(start, end);
+
+            if (pageJobs.length === 0) {
+                document.getElementById('jobsList').innerHTML = `
+                    <tr><td colspan="9" class="empty-state">
+                        <h3>暂无任务</h3>
+                        <p>点击"新建任务"或"从模板创建"开始使用</p>
+                    </td></tr>
+                `;
+                document.getElementById('pagination').style.display = 'none';
+                return;
+            }
+
+            const html = pageJobs.map(job => `
+                <tr>
+                    <td>${job.id}</td>
+                    <td><strong>${job.name}</strong></td>
+                    <td>${job.display_name}</td>
+                    <td><span class="type-badge">${job.type.toUpperCase()}</span></td>
+                    <td><span class="cron-expr" title="${job.cron_expr}">${job.cron_expr}</span></td>
+                    <td>
+                        <span class="status-badge ${job.enable ? 'status-enabled' : 'status-disabled'}">
+                            ${job.enable ? '已启用' : '已禁用'}
+                        </span>
+                    </td>
+                    <td class="task-status-${(job.status || 'idle').toLowerCase()}">${job.status || 'Idle'}</td>
+                    <td>${job.last_run_at ? new Date(job.last_run_at).toLocaleString('zh-CN') : '-'}</td>
+                    <td>
+                        <div class="action-buttons">
+                            <button class="btn btn-sm btn-primary" onclick="viewJob(${job.id})">查看</button>
+                            <button class="btn btn-sm btn-secondary" onclick="editJob(${job.id})">编辑</button>
+                            ${job.enable 
+                                ? `<button class="btn btn-sm btn-warning" onclick="toggleJob(${job.id}, false)">禁用</button>`
+                                : `<button class="btn btn-sm btn-success" onclick="toggleJob(${job.id}, true)">启用</button>`
+                            }
+                            <button class="btn btn-sm ${job.status === 'Running' ? 'btn-disabled' : 'btn-primary'}" 
+                                    onclick="testJob(${job.id})" ${job.status === 'Running' ? 'disabled' : ''}>测试</button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteJob(${job.id})">删除</button>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+
+            document.getElementById('jobsList').innerHTML = html;
+            
+            // 更新分页
+            const totalPages = Math.ceil(filteredJobs.length / pageSize);
+            document.getElementById('pagination').style.display = totalPages > 1 ? 'flex' : 'none';
+            document.getElementById('pageInfo').textContent = `第 ${currentPage} / ${totalPages || 1} 页`;
+            document.getElementById('prevBtn').disabled = currentPage === 1;
+            document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+        }
+
+        // 分页
+        function prevPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                renderJobs();
+            }
+        }
+
+        function nextPage() {
+            const totalPages = Math.ceil(filteredJobs.length / pageSize);
+            if (currentPage < totalPages) {
+                currentPage++;
+                renderJobs();
+            }
+        }
+
+        // 显示创建模态框
+        function showCreateModal() {
+            document.getElementById('modalTitle').textContent = '新建任务';
+            document.getElementById('jobForm').reset();
+            document.getElementById('jobId').value = '';
+            document.getElementById('jobParams').value = '{}';
+            document.getElementById('jobModal').classList.add('show');
+        }
+
+        // 关闭模态框
+        function closeModal() {
+            document.getElementById('jobModal').classList.remove('show');
+        }
+
+        // 编辑任务
+        async function editJob(id) {
+            try {
+                const response = await apiRequest(`/api/jobs/${id}`);
+                const result = await response.json();
+                const job = result.data;
+
+                document.getElementById('modalTitle').textContent = '编辑任务';
+                document.getElementById('jobId').value = job.id;
+                document.getElementById('jobName').value = job.name;
+                document.getElementById('displayName').value = job.display_name;
+                document.getElementById('jobType').value = job.type;
+                document.getElementById('cronExpr').value = job.cron_expr;
+                document.getElementById('jobParams').value = JSON.stringify(job.params, null, 2);
+                document.getElementById('priority').value = job.priority;
+                document.getElementById('timeout').value = job.timeout;
+                document.getElementById('maxRetries').value = job.max_retries;
+                document.getElementById('enable').value = job.enable.toString();
+                document.getElementById('description').value = job.description || '';
+                document.getElementById('tags').value = (job.tags || []).join(', ');
+                document.getElementById('dependencies').value = (job.dependencies || []).join(', ');
+
+                document.getElementById('jobModal').classList.add('show');
+            } catch (error) {
+                console.error('加载任务失败:', error);
+                alert('加载任务失败: ' + error.message);
+            }
+        }
+
+        // 保存任务
+        async function saveJob(event) {
+            event.preventDefault();
+
+            const jobId = document.getElementById('jobId').value;
+            const jobData = {
+                name: document.getElementById('jobName').value,
+                display_name: document.getElementById('displayName').value,
+                type: document.getElementById('jobType').value,
+                cron_expr: document.getElementById('cronExpr').value,
+                params: JSON.parse(document.getElementById('jobParams').value || '{}'),
+                priority: parseInt(document.getElementById('priority').value),
+                timeout: parseInt(document.getElementById('timeout').value),
+                max_retries: parseInt(document.getElementById('maxRetries').value),
+                enable: document.getElementById('enable').value === 'true',
+                description: document.getElementById('description').value,
+                tags: document.getElementById('tags').value.split(',').map(t => t.trim()).filter(t => t),
+                dependencies: document.getElementById('dependencies').value.split(',').map(t => t.trim()).filter(t => t)
+            };
+
+            try {
+                const url = jobId ? `/api/jobs/${jobId}` : '/api/jobs';
+                const method = jobId ? 'PUT' : 'POST';
+                
+                const response = await apiRequest(url, {
+                    method: method,
+                    body: JSON.stringify(jobData)
+                });
+
+                if (response.ok) {
+                    alert(jobId ? '更新成功' : '创建成功');
+                    closeModal();
+                    loadJobs();
+                } else {
+                    const error = await response.json();
+                    alert('操作失败: ' + (error.error || '未知错误'));
+                }
+            } catch (error) {
+                console.error('保存任务失败:', error);
+                alert('保存任务失败: ' + error.message);
+            }
+        }
+
+        // 删除任务
+        async function deleteJob(id) {
+            if (!confirm('确定要删除这个任务吗？')) return;
+
+            try {
+                const response = await apiRequest(`/api/jobs/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert('删除成功');
+                    loadJobs();
+                } else {
+                    const error = await response.json();
+                    alert('删除失败: ' + (error.error || '未知错误'));
+                }
+            } catch (error) {
+                console.error('删除任务失败:', error);
+                alert('删除任务失败: ' + error.message);
+            }
+        }
+
+        // 启用/禁用任务
+        async function toggleJob(id, enable) {
+            try {
+                const action = enable ? 'enable' : 'disable';
+                const response = await apiRequest(`/api/jobs/${id}/${action}`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    alert(enable ? '启用成功' : '禁用成功');
+                    loadJobs();
+                } else {
+                    const error = await response.json();
+                    alert('操作失败: ' + (error.error || '未知错误'));
+                }
+            } catch (error) {
+                console.error('切换状态失败:', error);
+                alert('操作失败: ' + error.message);
+            }
+        }
+
+        // 测试任务
+        async function testJob(id) {
+            if (!confirm('确定要测试执行这个任务吗？')) return;
+
+            try {
+                const response = await apiRequest(`/api/jobs/${id}/test`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    alert('测试任务已启动，请查看日志');
+                } else {
+                    const error = await response.json();
+                    alert('启动测试失败: ' + (error.error || '未知错误'));
+                }
+            } catch (error) {
+                console.error('测试任务失败:', error);
+                alert('测试任务失败: ' + error.message);
+            }
+        }
+
+        // 查看任务详情
+        function viewJob(id) {
+            window.location.href = `/job_detail.html?id=${id}`;
+        }
+
+        // 验证 Cron 表达式
+        async function validateCron() {
+            const cronExpr = document.getElementById('cronExpr').value;
+            if (!cronExpr) {
+                alert('请输入 Cron 表达式');
+                return;
+            }
+
+            try {
+                const response = await apiRequest('/api/jobs/validate-cron', {
+                    method: 'POST',
+                    body: JSON.stringify({ cron_expr: cronExpr })
+                });
+
+                const result = await response.json();
+                if (result.valid) {
+                    alert('Cron 表达式有效！\n\n接下来几次执行时间:\n' + result.next_runs.join('\n'));
+                } else {
+                    alert('Cron 表达式无效: ' + result.error);
+                }
+            } catch (error) {
+                console.error('验证失败:', error);
+                alert('验证失败: ' + error.message);
+            }
+        }
+
+        // 处理任务类型变化
+        function handleTypeChange() {
+            const type = document.getElementById('jobType').value;
+            const paramsTextarea = document.getElementById('jobParams');
+            let defaultParams = {};
+
+            switch (type) {
+                case 'shell':
+                    defaultParams = {
+                        command: 'echo "Hello World"',
+                        working_dir: '/tmp'
+                    };
+                    break;
+                case 'http':
+                    defaultParams = {
+                        url: 'http://localhost:8080',
+                        method: 'GET',
+                        timeout: 30
+                    };
+                    break;
+                case 'email':
+                    defaultParams = {
+                        to: ['user@example.com'],
+                        subject: '测试邮件',
+                        body: '这是一封测试邮件',
+                        is_html: false
+                    };
+                    break;
+                case 'sql':
+                    defaultParams = {
+                        query: 'SELECT 1',
+                        database: 'mysql'
+                    };
+                    break;
+                default:
+                    defaultParams = {};
+            }
+
+            paramsTextarea.value = JSON.stringify(defaultParams, null, 2);
+        }
+
+        // 显示从模板创建模态框
+        async function showCreateFromTemplate() {
+            try {
+                const response = await apiRequest('/api/jobs/templates');
+                const result = await response.json();
+                
+                const select = document.getElementById('templateSelect');
+                select.innerHTML = '<option value="">请选择模板</option>';
+                
+                result.data.forEach(template => {
+                    const option = document.createElement('option');
+                    option.value = template.id;
+                    option.textContent = template.name + ' - ' + template.description;
+                    select.appendChild(option);
+                });
+
+                document.getElementById('templateJobName').value = '';
+                document.getElementById('templateVariables').innerHTML = '';
+                document.getElementById('templateModal').classList.add('show');
+            } catch (error) {
+                console.error('加载模板失败:', error);
+                alert('加载模板失败: ' + error.message);
+            }
+        }
+
+        // 关闭模板模态框
+        function closeTemplateModal() {
+            document.getElementById('templateModal').classList.remove('show');
+        }
+
+        // 加载模板变量
+        function loadTemplateVariables() {
+            const templateId = document.getElementById('templateSelect').value;
+            if (!templateId) {
+                document.getElementById('templateVariables').innerHTML = '';
+                return;
+            }
+
+            // 从已加载的模板列表中找到选中的模板
+            const templates = JSON.parse(localStorage.getItem('templates') || '[]');
+            const template = templates.find(t => t.id === templateId);
+            
+            if (!template || !template.variables) {
+                document.getElementById('templateVariables').innerHTML = '';
+                return;
+            }
+
+            const html = template.variables.map(v => `
+                <div class="form-group">
+                    <label for="var_${v.name}">${v.label} ${v.required ? '*' : ''}</label>
+                    <input type="${v.type === 'number' ? 'number' : 'text'}" 
+                           id="var_${v.name}" 
+                           value="${v.default || ''}"
+                           placeholder="${v.description || ''}">
+                    ${v.description ? `<div class="form-hint">${v.description}</div>` : ''}
+                </div>
+            `).join('');
+
+            document.getElementById('templateVariables').innerHTML = html;
+        }
+
+        // 从模板创建任务
+        async function createFromTemplate() {
+            const templateId = document.getElementById('templateSelect').value;
+            const jobName = document.getElementById('templateJobName').value;
+            
+            if (!templateId) {
+                alert('请选择模板');
+                return;
+            }
+            if (!jobName) {
+                alert('请输入任务名称');
+                return;
+            }
+
+            // 收集变量值
+            const variableInputs = document.querySelectorAll('#templateVariables input');
+            const variables = {};
+            variableInputs.forEach(input => {
+                const varName = input.id.replace('var_', '');
+                variables[varName] = input.value;
+            });
+
+            try {
+                const response = await apiRequest('/api/jobs/from-template', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        template_id: templateId,
+                        name: jobName,
+                        variables: variables,
+                        enable: true
+                    })
+                });
+
+                if (response.ok) {
+                    alert('创建成功');
+                    closeTemplateModal();
+                    loadJobs();
+                } else {
+                    const error = await response.json();
+                    alert('创建失败: ' + (error.error || '未知错误'));
+                }
+            } catch (error) {
+                console.error('从模板创建失败:', error);
+                alert('创建失败: ' + error.message);
+            }
+        }
+
+        // 初始化
+        loadUserInfo();
+        loadJobs();
+
+        // 每30秒刷新数据
+        setInterval(loadJobs, 30000);
+    </script>
+</body>
+</html>

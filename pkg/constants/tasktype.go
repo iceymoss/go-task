@@ -6,4 +6,5 @@ const (
 	TaskTypeSYSTEM TaskType = "SYSTEM"
 	TaskTypeYAML   TaskType = "YAML"
 	TaskTypeAPI    TaskType = "API"
+	TaskTypeWEB    TaskType = "WEB"
 )
