@@ -475,10 +475,13 @@
                     <option value="false">已禁用</option>
                 </select>
             </div>
-            <div class="toolbar-right">
-                <button class="btn btn-success" onclick="showCreateFromTemplate()">从模板创建</button>
-                <button class="btn btn-primary" onclick="showCreateModal()">新建任务</button>
-            </div>
+                <div class="toolbar-right">
+                    <button class="btn btn-secondary" onclick="exportJobs()">导出任务</button>
+                    <button class="btn btn-secondary" onclick="document.getElementById('importInput').click()">导入任务</button>
+                    <input type="file" id="importInput" accept=".json" style="display: none;" onchange="importJobs(event)">
+                    <button class="btn btn-success" onclick="showCreateFromTemplate()">从模板创建</button>
+                    <button class="btn btn-primary" onclick="showCreateModal()">新建任务</button>
+                </div>
         </div>
 
         <!-- 任务列表 -->
@@ -1134,6 +1137,141 @@
             } catch (error) {
                 console.error('从模板创建失败:', error);
                 alert('创建失败: ' + error.message);
+            }
+        }
+
+        // 导出任务
+        async function exportJobs() {
+            try {
+                const response = await apiRequest('/api/jobs');
+                const result = await response.json();
+                const jobs = result.data || [];
+
+                if (jobs.length === 0) {
+                    alert('没有可导出的任务');
+                    return;
+                }
+
+                // 格式化为 JSON
+                const exportData = {
+                    version: '1.0',
+                    export_time: new Date().toISOString(),
+                    jobs: jobs.map(job => ({
+                        name: job.name,
+                        display_name: job.display_name,
+                        type: job.type,
+                        cron_expr: job.cron_expr,
+                        params: job.params,
+                        dependencies: job.dependencies,
+                        priority: job.priority,
+                        timeout: job.timeout,
+                        max_retries: job.max_retries,
+                        description: job.description,
+                        tags: job.tags
+                    }))
+                };
+
+                // 创建下载链接
+                const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `jobs_export_${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                alert(`已导出 ${jobs.length} 个任务`);
+            } catch (error) {
+                console.error('导出任务失败:', error);
+                alert('导出任务失败: ' + error.message);
+            }
+        }
+
+        // 导入任务
+        async function importJobs(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // 重置 input 以便可以再次选择同一文件
+            event.target.value = '';
+
+            try {
+                const text = await file.text();
+                const importData = JSON.parse(text);
+
+                // 验证数据格式
+                if (!importData.jobs || !Array.isArray(importData.jobs)) {
+                    alert('无效的导入文件格式');
+                    return;
+                }
+
+                const jobsToImport = importData.jobs;
+                const successCount = [];
+                const errorCount = [];
+
+                // 逐个导入任务
+                for (const jobData of jobsToImport) {
+                    try {
+                        // 检查任务名称是否已存在
+                        const checkResponse = await apiRequest(`/api/jobs?name=${jobData.name}`);
+                        const checkResult = await checkResponse.json();
+                        const existingJob = checkResult.data && checkResult.data.find(j => j.name === jobData.name);
+
+                        if (existingJob) {
+                            // 更新现有任务
+                            const updateResponse = await apiRequest(`/api/jobs/${existingJob.id}`, {
+                                method: 'PUT',
+                                body: JSON.stringify({
+                                    ...jobData,
+                                    enable: false // 导入时默认禁用，避免立即执行
+                                })
+                            });
+
+                            if (updateResponse.ok) {
+                                successCount.push(`更新: ${jobData.display_name}`);
+                            } else {
+                                errorCount.push(`更新失败: ${jobData.display_name}`);
+                            }
+                        } else {
+                            // 创建新任务
+                            const createResponse = await apiRequest('/api/jobs', {
+                                method: 'POST',
+                                body: JSON.stringify({
+                                    ...jobData,
+                                    enable: false // 导入时默认禁用
+                                })
+                            });
+
+                            if (createResponse.ok) {
+                                successCount.push(`创建: ${jobData.display_name}`);
+                            } else {
+                                errorCount.push(`创建失败: ${jobData.display_name}`);
+                            }
+                        }
+                    } catch (error) {
+                        console.error(`导入任务 ${jobData.display_name} 失败:`, error);
+                        errorCount.push(`错误: ${jobData.display_name}`);
+                    }
+                }
+
+                // 显示结果
+                let message = '';
+                if (successCount.length > 0) {
+                    message += `✅ 成功 ${successCount.length} 个任务:\n${successCount.slice(0, 5).join('\n')}\n`;
+                }
+                if (errorCount.length > 0) {
+                    message += `\n❌ 失败 ${errorCount.length} 个任务:\n${errorCount.slice(0, 5).join('\n')}\n`;
+                }
+                
+                alert(message || '导入完成');
+                
+                // 刷新任务列表
+                loadJobs();
+            } catch (error) {
+                console.error('导入任务失败:', error);
+                alert('导入任务失败: ' + error.message);
             }
         }
 

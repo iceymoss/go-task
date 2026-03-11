@@ -194,6 +194,159 @@ var templates = map[string]JobTemplate{
 			},
 		},
 	},
+	"monitor_disk": {
+		ID:          "monitor_disk",
+		Name:        "磁盘监控",
+		Description: "监控磁盘使用率，超过阈值发送告警",
+		Type:        "shell",
+		CronExpr:    "*/30 * * * *", // 每30分钟
+		Params: map[string]any{
+			"command":     "df -h {{mount_point}} | awk 'NR==2 {print $5}' | sed 's/%//'",
+			"working_dir": "/",
+		},
+		Variables: []TemplateVar{
+			{
+				Name:        "mount_point",
+				Label:       "挂载点",
+				Type:        "string",
+				Default:     "/",
+				Description: "要监控的磁盘挂载点",
+			},
+		},
+	},
+	"restart_service": {
+		ID:          "restart_service",
+		Name:        "重启服务",
+		Description: "定时重启指定服务",
+		Type:        "shell",
+		CronExpr:    "0 3 * * 0", // 每周日凌晨3点
+		Params: map[string]any{
+			"command":     "systemctl restart {{service_name}} && echo 'Service restarted successfully'",
+			"working_dir": "/",
+		},
+		Variables: []TemplateVar{
+			{
+				Name:        "service_name",
+				Label:       "服务名称",
+				Type:        "string",
+				Default:     "nginx",
+				Description: "要重启的服务名称",
+			},
+		},
+	},
+	"api_sync": {
+		ID:          "api_sync",
+		Name:        "API数据同步",
+		Description: "从外部API同步数据到本地",
+		Type:        "http",
+		CronExpr:    "0 */2 * * *", // 每2小时
+		Params: map[string]any{
+			"url":             "{{api_url}}",
+			"method":          "GET",
+			"headers":         map[string]string{"Authorization": "Bearer {{token}}"},
+			"expected_status": 200,
+			"timeout":         60,
+		},
+		Variables: []TemplateVar{
+			{
+				Name:        "api_url",
+				Label:       "API地址",
+				Type:        "string",
+				Default:     "https://api.example.com/data",
+				Description: "要同步的API地址",
+			},
+			{
+				Name:        "token",
+				Label:       "API Token",
+				Type:        "string",
+				Default:     "",
+				Description: "API认证Token",
+			},
+		},
+	},
+	"generate_report": {
+		ID:          "generate_report",
+		Name:        "生成报表",
+		Description: "生成业务数据报表",
+		Type:        "shell",
+		CronExpr:    "0 6 * * *", // 每天早上6点
+		Params: map[string]any{
+			"command":     "python /scripts/generate_report.py --date {{report_date}} --output /reports/{{report_name}}.pdf",
+			"working_dir": "/",
+		},
+		Variables: []TemplateVar{
+			{
+				Name:        "report_date",
+				Label:       "报表日期",
+				Type:        "string",
+				Default:     "{{date}}",
+				Description: "报表日期",
+			},
+			{
+				Name:        "report_name",
+				Label:       "报表名称",
+				Type:        "string",
+				Default:     "daily_report",
+				Description: "报表文件名",
+			},
+		},
+	},
+	"cache_clear": {
+		ID:          "cache_clear",
+		Name:        "缓存清理",
+		Description: "清理应用缓存",
+		Type:        "shell",
+		CronExpr:    "0 */6 * * *", // 每6小时
+		Params: map[string]any{
+			"command":     "rm -rf {{cache_dir}}/* && echo 'Cache cleared successfully'",
+			"working_dir": "/",
+		},
+		Variables: []TemplateVar{
+			{
+				Name:        "cache_dir",
+				Label:       "缓存目录",
+				Type:        "string",
+				Default:     "/var/cache/myapp",
+				Description: "缓存文件所在目录",
+			},
+		},
+	},
+	"send_notification": {
+		ID:          "send_notification",
+		Name:        "发送通知",
+		Description: "发送系统通知",
+		Type:        "email",
+		CronExpr:    "0 9 * * 1-5", // 工作日早上9点
+		Params: map[string]any{
+			"to":      []string{"{{recipients}}"},
+			"subject": "{{subject}}",
+			"body":    "{{content}}",
+			"is_html": false,
+		},
+		Variables: []TemplateVar{
+			{
+				Name:        "recipients",
+				Label:       "收件人（逗号分隔）",
+				Type:        "string",
+				Default:     "admin@example.com",
+				Description: "通知接收邮箱",
+			},
+			{
+				Name:        "subject",
+				Label:       "主题",
+				Type:        "string",
+				Default:     "系统通知",
+				Description: "邮件主题",
+			},
+			{
+				Name:        "content",
+				Label:       "内容",
+				Type:        "string",
+				Default:     "",
+				Description: "通知内容",
+			},
+		},
+	},
 }
 
 // GetJobTemplates 获取所有模板
