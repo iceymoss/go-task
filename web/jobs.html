@@ -447,6 +447,8 @@
         <nav class="nav-links">
             <a href="/index.html">仪表盘</a>
             <a href="/jobs.html" class="active">任务管理</a>
+            <a href="/job_test.html">任务测试</a>
+            <a href="/reports.html">执行统计</a>
         </nav>
         <div class="user-info">
             <span id="welcomeMessage">欢迎, 加载中...</span>
@@ -468,6 +470,9 @@
                     <option value="email">Email</option>
                     <option value="sql">SQL</option>
                     <option value="custom">Custom</option>
+                </select>
+                <select class="filter-select" id="tagFilter" onchange="loadJobs()">
+                    <option value="">所有标签</option>
                 </select>
                 <select class="filter-select" id="enableFilter" onchange="loadJobs()">
                     <option value="">所有状态</option>
@@ -710,6 +715,10 @@
                 const result = await response.json();
                 
                 allJobs = result.data || [];
+                
+                // 提取所有标签并填充筛选器
+                populateTagFilter();
+                
                 applyFilters();
             } catch (error) {
                 console.error('加载任务失败:', error);
@@ -719,12 +728,49 @@
             }
         }
 
+        // 填充标签筛选器
+        function populateTagFilter() {
+            const allTags = new Set();
+            allJobs.forEach(job => {
+                if (job.tags && Array.isArray(job.tags)) {
+                    job.tags.forEach(tag => allTags.add(tag));
+                }
+            });
+
+            const tagFilter = document.getElementById('tagFilter');
+            const currentSelection = tagFilter.value;
+            
+            tagFilter.innerHTML = '<option value="">所有标签</option>';
+            Array.from(allTags).sort().forEach(tag => {
+                const option = document.createElement('option');
+                option.value = tag;
+                option.textContent = tag;
+                tagFilter.appendChild(option);
+            });
+
+            // 恢复之前的选择（如果还存在）
+            if (allTags.has(currentSelection)) {
+                tagFilter.value = currentSelection;
+            }
+        }
+
         // 应用搜索过滤
         function applyFilters() {
             const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const tagFilter = document.getElementById('tagFilter').value;
+            
             filteredJobs = allJobs.filter(job => {
-                return job.name.toLowerCase().includes(searchTerm) ||
-                       job.display_name.toLowerCase().includes(searchTerm);
+                // 搜索词过滤
+                const matchesSearch = job.name.toLowerCase().includes(searchTerm) ||
+                                    job.display_name.toLowerCase().includes(searchTerm);
+                
+                // 标签过滤
+                let matchesTag = true;
+                if (tagFilter) {
+                    matchesTag = job.tags && Array.isArray(job.tags) && job.tags.includes(tagFilter);
+                }
+                
+                return matchesSearch && matchesTag;
             });
             currentPage = 1;
             renderJobs();

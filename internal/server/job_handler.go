@@ -634,3 +634,79 @@ func parseCronExpr(expr string) (cron.Schedule, error) {
 	parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	return parser.Parse(expr)
 }
+
+// SaveAsTemplate 将任务保存为自定义模板
+func (h *JobHandler) SaveAsTemplate(c *gin.Context) {
+	id := c.Param("id")
+
+	// 获取任务信息
+	var job models.Job
+	if err := h.db.First(&job, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":    404,
+			"message": "任务不存在",
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	var req struct {
+		Name        string `json:"name" binding:"required"`
+		Description string `json:"description"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "参数错误",
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	// 创建自定义模板
+	templateID := fmt.Sprintf("custom_%d", job.ID)
+	customTemplate := tasks.JobTemplate{
+		ID:          templateID,
+		Name:        req.Name,
+		Description: req.Description,
+		Type:        job.Type,
+		CronExpr:    job.CronExpr,
+		Params:      make(map[string]interface{}),
+		Variables:   []tasks.TemplateVar{},
+	}
+
+	// 解析参数
+	if job.Params != "" {
+		if err := json.Unmarshal([]byte(job.Params), &customTemplate.Params); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"code":    400,
+				"message": "参数解析失败",
+				"error":   err.Error(),
+			})
+			return
+		}
+	}
+
+	// 保存到数据库
+	job.IsTemplate = true
+	job.Description = req.Description
+
+	// 更新任务为模板
+	if err := h.db.Save(&job).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "保存模板失败",
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	// 添加到模板列表
+	tasks.AddTemplate(customTemplate)
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    200,
+		"message": "保存模板成功",
+		"data":    customTemplate,
+	})
+}

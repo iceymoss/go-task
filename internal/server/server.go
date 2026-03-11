@@ -117,6 +117,7 @@ func NewServer(cfg *conf.Config, staticFS fs.FS) *Server {
 		api.GET("/jobs/templates", jobHandler.GetJobTemplates)
 		api.POST("/jobs/from-template", jobHandler.CreateFromTemplate)
 		api.GET("/jobs/dependency-graph", jobHandler.GetDependencyGraph)
+		api.POST("/jobs/:id/save-template", jobHandler.SaveAsTemplate)
 
 		// 仪表盘统计数据
 		api.GET("/dashboard/stats", func(c *gin.Context) {
