@@ -11,10 +11,11 @@ import (
 )
 
 type Config struct {
-	Server ServerConfig `mapstructure:"server"`
-	Jobs   []JobConfig  `mapstructure:"jobs"`
-	Mysql  MysqlConfig  `mapstructure:"mysql"`
-	Redis  RedisConfig  `mapstructure:"redis"`
+	Server ServerConfig   `mapstructure:"server"`
+	Jobs   []JobConfig    `mapstructure:"jobs"`
+	Mysql  MysqlConfig    `mapstructure:"mysql"`
+	Redis  RedisConfig    `mapstructure:"redis"`
+	Auth   AuthConfig     `mapstructure:"auth"`
 }
 
 type ServerConfig struct {
@@ -36,6 +37,16 @@ type RedisConfig struct {
 	Password string `mapstructure:"password"`
 	Db       int    `mapstructure:"db"`
 	PoolSize int    `mapstructure:"pool_size"`
+}
+
+type AuthConfig struct {
+	JWTSecret      string `mapstructure:"jwt_secret"`
+	TokenExpireHrs int    `mapstructure:"token_expire_hrs"`
+	DefaultAdmin   struct {
+		Username string `mapstructure:"username"`
+		Password string `mapstructure:"password"`
+		Email    string `mapstructure:"email"`
+	} `mapstructure:"default_admin"`
 }
 
 type JobConfig struct {

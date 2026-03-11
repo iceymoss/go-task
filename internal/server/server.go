@@ -10,17 +10,39 @@ import (
 	"github.com/iceymoss/go-task/internal/conf"
 	"github.com/iceymoss/go-task/internal/engine"
 	"github.com/iceymoss/go-task/internal/tasks"
+	"github.com/iceymoss/go-task/pkg/auth"
 	"github.com/iceymoss/go-task/pkg/constants"
+	"github.com/iceymoss/go-task/pkg/db/models"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
 
 type Server struct {
-	engine    *gin.Engine
-	scheduler *engine.Scheduler
+	engine      *gin.Engine
+	scheduler   *engine.Scheduler
+	db          *gorm.DB
+	authHandler *AuthHandler
+	jwtService  *auth.JWTService
 }
 
 func NewServer(cfg *conf.Config, staticFS fs.FS) *Server {
+	// 初始化数据库连接
+	dsn := cfg.Mysql.User + ":" + cfg.Mysql.Password + "@tcp(" + cfg.Mysql.Host + ":" + cfg.Mysql.Port + ")/" + cfg.Mysql.Database + "?charset=utf8mb4&parseTime=True&loc=Local"
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("❌ Failed to connect database: %v", err)
+	}
+
+	// 自动迁移
+	if err := db.AutoMigrate(&models.User{}, &models.Session{}); err != nil {
+		log.Printf("⚠️ Failed to migrate database: %v", err)
+	}
+
+	// 创建认证处理器
+	authHandler := NewAuthHandler(db, cfg)
+
 	scheduler := engine.NewScheduler()
 
 	tasks.ApplyAutoJobs(scheduler)
@@ -44,8 +66,22 @@ func NewServer(cfg *conf.Config, staticFS fs.FS) *Server {
 
 	router := gin.Default()
 
-	api := router.Group("/api")
+	// 认证路由（无需token）
+	authGroup := router.Group("/api/auth")
 	{
+		authGroup.POST("/login", authHandler.Login)
+		authGroup.POST("/refresh", authHandler.RefreshToken)
+	}
+
+	// 需要认证的路由
+	api := router.Group("/api")
+	api.Use(auth.AuthMiddleware(authHandler.jwtService))
+	{
+		// 用户相关
+		api.GET("/auth/me", authHandler.GetMe)
+		api.POST("/auth/logout", authHandler.Logout)
+
+		// 任务相关（需要认证）
 		api.GET("/tasks", func(c *gin.Context) {
 			c.JSON(200, gin.H{"data": scheduler.Stats.GetAll()})
 		})
@@ -57,6 +93,35 @@ func NewServer(cfg *conf.Config, staticFS fs.FS) *Server {
 				return
 			}
 			c.JSON(200, gin.H{"message": "Triggered"})
+		})
+
+		// 仪表盘统计数据
+		api.GET("/dashboard/stats", func(c *gin.Context) {
+			stats := scheduler.Stats.GetAll()
+
+			// 计算统计数据
+			totalTasks := len(stats)
+			runningTasks := 0
+			successTasks := 0
+			errorTasks := 0
+
+			for _, stat := range stats {
+				if stat.Status == "Running" {
+					runningTasks++
+				} else if stat.Status == "Idle" && stat.LastResult == "Success" {
+					successTasks++
+				} else if stat.Status == "Error" {
+					errorTasks++
+				}
+			}
+
+			c.JSON(200, gin.H{
+				"total_tasks":   totalTasks,
+				"running_tasks": runningTasks,
+				"success_tasks": successTasks,
+				"error_tasks":   errorTasks,
+				"tasks":         stats,
+			})
 		})
 	}
 
@@ -70,7 +135,13 @@ func NewServer(cfg *conf.Config, staticFS fs.FS) *Server {
 		http.FileServer(http.FS(staticFS)).ServeHTTP(c.Writer, c.Request)
 	})
 
-	return &Server{engine: router, scheduler: scheduler}
+	return &Server{
+		engine:      router,
+		scheduler:   scheduler,
+		db:          db,
+		authHandler: authHandler,
+		jwtService:  authHandler.jwtService,
+	}
 }
 
 func (s *Server) Run(addr string) error {
