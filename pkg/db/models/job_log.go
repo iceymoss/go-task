@@ -17,7 +17,7 @@ type JobLog struct {
 	Fields   string `gorm:"type:json" json:"fields,omitempty"`                 // 结构化字段
 
 	// 时间信息
-	Timestamp time.Time `gorm:"index:idx_timestamp;not null" json:"timestamp"` // 日志时间戳
+	Timestamp time.Time `gorm:"index" json:"timestamp"` // 日志时间戳
 	CreatedAt time.Time `json:"created_at"`
 }
 

@@ -38,7 +38,7 @@
 - ✅ `sys_workflow_templates` - 工作流模板表
 - ✅ `sys_composite_templates` - 组合任务模板表
 
-**文件位置**: `pkg/db/migrations/001_create_all_tables.sql`
+**文件位置**: `pkg/db/migrations/tables.sql`
 
 ---
 
@@ -278,7 +278,7 @@ collection.InsertOne(ctx, log)
    - 需要安装 `go.uber.org/zap`
 
 2. **数据库迁移**
-   - 运行 `pkg/db/migrations/001_create_all_tables.sql`
+   - 运行 `pkg/db/migrations/tables.sql`
    - 建议使用迁移工具（如 golang-migrate）
 
 3. **MongoDB索引**

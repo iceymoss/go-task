@@ -25,12 +25,12 @@ const (
 
 // Event 任务事件
 type Event struct {
-	Type      EventType // 事件类型
-	TaskName  string    // 任务名称
-	TimeStamp time.Time // 时间戳
-	Context   context.Context
-	Error     error          // 错误信息（如果有）
-	Data      map[string]any // 附加数据
+	Type      EventType       // 事件类型
+	TaskName  string          // 任务名称
+	TimeStamp time.Time       // 时间戳
+	Context   context.Context // 上下文
+	Error     error           // 错误信息
+	Data      map[string]any  // 附加数据
 }
 
 // EventHandler 事件处理器接口
@@ -47,8 +47,8 @@ func (f EventHandlerFunc) Handle(event *Event) {
 
 // EventManager 事件管理器
 type EventManager struct {
-	handlers map[EventType][]EventHandler
-	mu       sync.RWMutex
+	handlers map[EventType][]EventHandler // 事件类型 -> 处理器列表
+	mu       sync.RWMutex                 // 保护 handlers 的并发访问
 }
 
 // NewEventManager 创建事件管理器
@@ -164,7 +164,7 @@ func MetricsEventHandler() EventHandlerFunc {
 	}
 }
 
-// AlertEventHandler 发送告警通知
+// AlertConfig 发送告警通知
 type AlertConfig struct {
 	Enabled    bool
 	OnErrors   bool
@@ -221,7 +221,7 @@ func NewAlertEventHandler(config AlertConfig) EventHandlerFunc {
 	}
 }
 
-// HistoryEventHandler 记录任务历史
+// HistoryStorage 记录任务历史
 type HistoryStorage interface {
 	SaveEvent(event *Event) error
 }
@@ -238,7 +238,7 @@ func NewHistoryEventHandler(storage HistoryStorage) EventHandlerFunc {
 	}
 }
 
-// WebhookEventHandler 发送Webhook通知
+// WebhookConfig 发送Webhook通知
 type WebhookConfig struct {
 	Enabled bool
 	URLs    []string

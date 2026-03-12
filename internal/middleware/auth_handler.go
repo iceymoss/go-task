@@ -1,4 +1,4 @@
-package server
+package middleware
 
 import (
 	"net/http"
@@ -13,8 +13,8 @@ import (
 
 // AuthHandler 认证处理器
 type AuthHandler struct {
-	authService *auth.AuthService
-	jwtService  *auth.JWTService
+	AuthService *auth.AuthService
+	JwtService  *auth.JWTService
 }
 
 // NewAuthHandler 创建认证处理器
@@ -33,8 +33,8 @@ func NewAuthHandler(db *gorm.DB, cfg *conf.Config) *AuthHandler {
 	}
 
 	return &AuthHandler{
-		authService: authService,
-		jwtService:  jwtService,
+		AuthService: authService,
+		JwtService:  jwtService,
 	}
 }
 
@@ -58,7 +58,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	user, token, err := h.authService.Login(req.Username, req.Password)
+	user, token, err := h.AuthService.Login(req.Username, req.Password)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -86,7 +86,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		token = token[7:]
 	}
 
-	if err := h.authService.Logout(token); err != nil {
+	if err := h.AuthService.Logout(token); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -102,7 +102,7 @@ func (h *AuthHandler) GetMe(c *gin.Context) {
 		return
 	}
 
-	user, err := h.authService.GetCurrentUser(userID.(uint))
+	user, err := h.AuthService.GetCurrentUser(userID.(uint))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -127,7 +127,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	newToken, err := h.authService.RefreshToken(req.Token)
+	newToken, err := h.AuthService.RefreshToken(req.Token)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return

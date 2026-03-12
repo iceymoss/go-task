@@ -13,22 +13,24 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+type Register struct {
+	task     core.Task
+	params   map[string]any
+	chain    Chain
+	priority int
+}
+
 type Scheduler struct {
-	cron              *cron.Cron
-	Stats             *StatManager
-	DependencyManager *DependencyManager
-	EventManager      *EventManager
-	RetryManager      *RetryManager
-	TaskQueue         *TaskQueue
-	leaderElector     LeaderElector
-	leaderCancel      context.CancelFunc
-	registered        map[string]struct {
-		task     core.Task
-		params   map[string]any
-		chain    Chain
-		priority int
-	}
-	mu sync.RWMutex
+	cron              *cron.Cron          // 任务调度器
+	Stats             *StatManager        // 任务状态管理器
+	DependencyManager *DependencyManager  // 任务依赖管理器
+	EventManager      *EventManager       // 事件管理器
+	RetryManager      *RetryManager       // 重试管理器
+	TaskQueue         *TaskQueue          // 任务队列（可选，支持优先级和限流）
+	leaderElector     LeaderElector       // 选主器（可选，支持分布式部署）
+	leaderCancel      context.CancelFunc  // 选主停止函数
+	registered        map[string]Register // 已注册的任务信息，key 是 uniqueJobName
+	mu                sync.RWMutex        // 保护 registered 和任务状态的并发访问
 }
 
 func NewScheduler() *Scheduler {
@@ -38,12 +40,7 @@ func NewScheduler() *Scheduler {
 		DependencyManager: NewDependencyManager(),
 		EventManager:      NewEventManager(),
 		RetryManager:      NewRetryManager(),
-		registered: make(map[string]struct {
-			task     core.Task
-			params   map[string]any
-			chain    Chain
-			priority int
-		}),
+		registered:        make(map[string]Register),
 	}
 
 	// 设置全局事件管理器
@@ -65,8 +62,8 @@ func NewScheduler() *Scheduler {
 	scheduler.EventManager.OnFunc(EventTypeAfterJob, NewHistoryEventHandler(historyStorage))
 	scheduler.EventManager.OnFunc(EventTypeJobError, NewHistoryEventHandler(historyStorage))
 
-	// 初始化任务队列（默认 4 个 worker）
-	scheduler.TaskQueue = NewTaskQueue(scheduler, 4)
+	// 初始化任务队列（默认 10 个 worker）
+	scheduler.TaskQueue = NewTaskQueue(scheduler, 10)
 
 	return scheduler
 }
@@ -100,12 +97,7 @@ func (s *Scheduler) AddJob(cronExpr, taskName, uniqueJobName string, params map[
 	})
 
 	// 保存引用以便手动触发
-	s.registered[uniqueJobName] = struct {
-		task     core.Task
-		params   map[string]any
-		chain    Chain
-		priority int
-	}{
+	s.registered[uniqueJobName] = Register{
 		task:     taskInstance,
 		params:   params,
 		chain:    s.buildDefaultChain(uniqueJobName),

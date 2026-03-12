@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -87,7 +88,7 @@ func (rm *RetryManager) ShouldRetry(taskName string, attempt int, err error) boo
 	// 如果配置了可重试的错误列表，检查错误是否在列表中
 	if len(policy.RetryableErrors) > 0 {
 		for _, retryableErr := range policy.RetryableErrors {
-			if err == retryableErr {
+			if errors.Is(retryableErr, err) {
 				return true
 			}
 		}

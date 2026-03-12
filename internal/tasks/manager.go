@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"fmt"
+	"github.com/iceymoss/go-task/internal/conf"
 	"log"
 	"sync"
 
@@ -9,22 +10,38 @@ import (
 	"github.com/iceymoss/go-task/pkg/constants"
 )
 
+// Scheduler 定义了调度器接口，供 ApplyAutoJobs 调用
 type Scheduler interface {
 	AddJob(cronExpr, taskName, uniqueJobName string, params map[string]any, source string) error
 }
 
-func ApplyAutoJobs(sched Scheduler) {
+// ApplyJobs 将自动任务注册到调度器中
+func ApplyJobs(schema Scheduler, cfg *conf.Config) {
 	mu.RLock()
 	defer mu.RUnlock()
 
+	// 遍历自动任务列表
 	for _, job := range autoJobs {
 		fmt.Println("注册自动任务中：", job.Name)
 		// 调用调度器添加任务
-		err := sched.AddJob(job.Cron, job.Name, job.Name, job.Params, string(constants.TaskTypeSYSTEM))
+		err := schema.AddJob(job.Cron, job.Name, job.Name, job.Params, string(constants.TaskTypeSYSTEM))
 		if err != nil {
 			log.Printf("❌ [AutoLoad] Failed to load %s: %v", job.Name, err)
 		} else {
 			log.Printf("✅ [AutoLoad] Loaded: %s [%s]", job.Name, job.Cron)
+		}
+	}
+
+	// 注册所有配置型任务
+	for _, job := range cfg.Jobs {
+		if !job.Enable {
+			continue
+		}
+		err := schema.AddJob(job.Cron, job.Name, job.Name, job.Params, string(constants.TaskTypeYAML))
+		if err != nil {
+			log.Printf("⚠️ Failed to schedule %s: %v", job.Name, err)
+		} else {
+			log.Printf("✅ Job scheduled: %s [%s]", job.Name, job.Cron)
 		}
 	}
 }

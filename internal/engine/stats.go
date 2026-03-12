@@ -19,29 +19,34 @@ type JobStats struct {
 	Source      string    `json:"source"` // 任务来源 (例如: "SYSTEM", "YAML", "API")
 }
 
+// StatManager 任务状态管理器
 type StatManager struct {
-	stats map[string]*JobStats
-	mu    sync.RWMutex
+	stats map[string]*JobStats // 任务名称 -> 状态
+	mu    sync.RWMutex         // 保护 stats 的读写
 }
 
+// NewStatManager 创建状态管理器
 func NewStatManager() *StatManager {
 	return &StatManager{
 		stats: make(map[string]*JobStats),
 	}
 }
 
+// Set 设置任务状态
 func (m *StatManager) Set(name string, stat *JobStats) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.stats[name] = stat
 }
 
+// Get 获取任务状态
 func (m *StatManager) Get(name string) *JobStats {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.stats[name]
 }
 
+// GetAll 获取所有任务状态
 func (m *StatManager) GetAll() []*JobStats {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

@@ -4,12 +4,10 @@ import (
 	"log"
 
 	"github.com/iceymoss/go-task/internal/conf"
+	_ "github.com/iceymoss/go-task/internal/resgister"
 	"github.com/iceymoss/go-task/internal/server"
-	"github.com/iceymoss/go-task/web"
-	// import anonymously to register tasks to the list
-	_ "github.com/iceymoss/go-task/internal/tasks/ai"
-	//_ "github.com/iceymoss/go-task/internal/tasks/network"
 	"github.com/iceymoss/go-task/pkg/logger"
+	"github.com/iceymoss/go-task/web"
 
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
@@ -26,7 +24,7 @@ func main() {
 		logger.Fatal("❌ LoadConfig error", zap.Error(err))
 	}
 
-	srv := server.NewServer(cfg, web.StaticFiles)
+	srv := server.NewServer(cfg, &web.StaticFiles)
 
 	port := cfg.Server.Port
 	if port == "" {

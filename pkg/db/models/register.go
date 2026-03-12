@@ -1,9 +1,12 @@
 package models
 
-import "gorm.io/gorm"
+import (
+	libDB "github.com/iceymoss/go-task/pkg/db"
+)
 
 // RegisterMySQLModels 注册所有MySQL模型
-func RegisterMySQLModels(db *gorm.DB) error {
+func RegisterMySQLModels() error {
+	db := libDB.GetMysqlConn(libDB.MYSQL_DB_GO_TASK)
 	// 用户和权限相关
 	err := db.AutoMigrate(
 		&User{},

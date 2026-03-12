@@ -44,10 +44,10 @@ type DependencyManager struct {
 
 // TaskStatus 任务依赖状态
 type TaskStatus struct {
-	Completed  bool
-	Success    bool
-	FinishedAt time.Time
-	Error      error
+	Completed  bool      //  是否完成
+	Success    bool      //  是否成功
+	FinishedAt time.Time //  完成时间
+	Error      error     //  错误信息
 }
 
 // NewDependencyManager 创建依赖管理器
@@ -222,7 +222,7 @@ func (dm *DependencyManager) GetDependencyChain(taskName string) ([]string, erro
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
 
-	chain := []string{}
+	var chain []string
 	visited := make(map[string]bool)
 
 	dm.buildDependencyChain(taskName, visited, &chain)
