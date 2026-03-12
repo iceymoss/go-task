@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -364,7 +365,7 @@ func (h *JobHandler) TestJob(c *gin.Context) {
 	id := c.Param("id")
 	var job models.Job
 	if err := h.db.First(&job, id).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
 			return
 		}
