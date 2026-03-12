@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/iceymoss/go-task/pkg/logger"
+
 	"go.uber.org/zap"
 )
 
@@ -19,34 +20,34 @@ var (
 type DependencyType int
 
 const (
-	DependencyTypeAllSuccess DependencyType = iota // 所有依赖都成功后执行
-	DependencyTypeAnySuccess                       // 任一依赖成功后执行
-	DependencyTypeAllComplete                      // 所有依赖完成后执行（无论成功失败）
+	DependencyTypeAllSuccess  DependencyType = iota // 所有依赖都成功后执行
+	DependencyTypeAnySuccess                        // 任一依赖成功后执行
+	DependencyTypeAllComplete                       // 所有依赖完成后执行（无论成功失败）
 )
 
 // DependencyRule 任务依赖规则
 type DependencyRule struct {
-	TaskName        string         // 当前任务名称
-	DependsOn       []string       // 依赖的任务名称列表
-	DependencyType  DependencyType // 依赖类型
-	Timeout         time.Duration  // 等待依赖完成的超时时间
-	CheckInterval   time.Duration  // 检查依赖状态的间隔
+	TaskName       string         // 当前任务名称
+	DependsOn      []string       // 依赖的任务名称列表
+	DependencyType DependencyType // 依赖类型
+	Timeout        time.Duration  // 等待依赖完成的超时时间
+	CheckInterval  time.Duration  // 检查依赖状态的间隔
 }
 
 // DependencyManager 依赖管理器
 type DependencyManager struct {
 	dependencies map[string]*DependencyRule // 任务名 -> 依赖规则
-	taskStatus   map[string]TaskStatus     // 任务名 -> 任务状态
+	taskStatus   map[string]TaskStatus      // 任务名 -> 任务状态
 	graph        map[string][]string        // 任务依赖图（用于检测循环依赖）
 	mu           sync.RWMutex
 }
 
 // TaskStatus 任务依赖状态
 type TaskStatus struct {
-	Completed bool
-	Success   bool
+	Completed  bool
+	Success    bool
 	FinishedAt time.Time
-	Error     error
+	Error      error
 }
 
 // NewDependencyManager 创建依赖管理器
@@ -194,10 +195,10 @@ func (dm *DependencyManager) UpdateTaskStatus(taskName string, success bool, err
 	defer dm.mu.Unlock()
 
 	dm.taskStatus[taskName] = TaskStatus{
-		Completed: true,
-		Success:   success,
+		Completed:  true,
+		Success:    success,
 		FinishedAt: time.Now(),
-		Error:     err,
+		Error:      err,
 	}
 
 	logger.Info("📊 [Dependency] Updated task status",

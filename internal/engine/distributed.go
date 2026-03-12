@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -154,7 +155,7 @@ func (r *RedisLeaderElector) renewLock(ctx context.Context) error {
 	}
 
 	val, err := r.client.Get(ctx, r.key).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		// key 不存在，锁已丢失
 		return fmt.Errorf("lock key missing")
 	}
