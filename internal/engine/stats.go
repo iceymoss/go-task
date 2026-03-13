@@ -6,11 +6,30 @@ import (
 	"time"
 )
 
+// status 状态常量
+type jobStatus string
+
+const (
+	Idle    jobStatus = "Idle"
+	Waiting           = "Waiting"
+	Queued            = "Queued"
+	Running           = "Running"
+	Error             = "Error"
+	Success           = "Success"
+)
+
+const (
+	LastResultSuccess         string = "Success"
+	LastResultError                  = "Error: %v"
+	LastResultPending                = "Pending"
+	LastResultDependencyCheck        = "Dependency check failed: %v"
+)
+
 // JobStats 任务运行时状态
 type JobStats struct {
 	Name        string    `json:"name"`
 	CronExpr    string    `json:"cron_expr"`
-	Status      string    `json:"status"`      // Idle, Running, Error
+	Status      jobStatus `json:"status"`      // Idle, Waiting, Queued, Running, Error,
 	LastRunTime string    `json:"last_run"`    // 格式化后的时间
 	NextRunTime string    `json:"next_run"`    // 格式化后的时间
 	LastResult  string    `json:"last_result"` // 成功或错误信息

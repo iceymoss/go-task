@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/iceymoss/go-task/pkg/logger"
+
 	"go.uber.org/zap"
 )
 
@@ -28,6 +29,8 @@ func (c Chain) Then(wrappers ...JobWrapper) Chain {
 
 // Apply 应用所有包装器到任务函数
 func (c Chain) Apply(job JobFunc) JobFunc {
+	// Chain中每一个元素都是一个返回JobWrapper类型的函数
+	// 所以这里就是将job这个函数增加chain中每一个函数的能力
 	for i := len(c) - 1; i >= 0; i-- {
 		job = c[i](job)
 	}

@@ -2,12 +2,14 @@ package tasks
 
 import (
 	"fmt"
-	"log"
 	"sync"
 
 	"github.com/iceymoss/go-task/internal/conf"
 	"github.com/iceymoss/go-task/internal/core"
 	"github.com/iceymoss/go-task/pkg/constants"
+	"github.com/iceymoss/go-task/pkg/logger"
+
+	"go.uber.org/zap"
 )
 
 // Scheduler 定义了调度器接口，供 ApplyAutoJobs 调用
@@ -26,9 +28,9 @@ func ApplyJobs(schema Scheduler, cfg *conf.Config) {
 		// 调用调度器添加任务
 		err := schema.AddJob(job.Cron, job.Name, job.Name, job.Params, string(constants.TaskTypeSYSTEM))
 		if err != nil {
-			log.Printf("❌ [AutoLoad] Failed to load %s: %v", job.Name, err)
+			logger.Info("❌ [AutoLoad] Failed to load", zap.Any("jobname", job.Name), zap.Error(err))
 		} else {
-			log.Printf("✅ [AutoLoad] Loaded: %s [%s]", job.Name, job.Cron)
+			logger.Info("✅ [AutoLoad] Loaded", zap.Any("jobname", job.Name))
 		}
 	}
 
@@ -39,9 +41,9 @@ func ApplyJobs(schema Scheduler, cfg *conf.Config) {
 		}
 		err := schema.AddJob(job.Cron, job.Name, job.Name, job.Params, string(constants.TaskTypeYAML))
 		if err != nil {
-			log.Printf("⚠️ Failed to schedule %s: %v", job.Name, err)
+			logger.Info("❌ [AutoLoad] Failed to load", zap.Any("jobname", job.Name), zap.Error(err))
 		} else {
-			log.Printf("✅ Job scheduled: %s [%s]", job.Name, job.Cron)
+			logger.Info("✅ [AutoLoad] Loaded", zap.Any("jobname", job.Name), zap.Any("cron", job.Cron))
 		}
 	}
 }
@@ -82,6 +84,17 @@ func RegisterAuto(name string, cron string, creator core.TaskCreator, defaultPar
 		Creator: creator,
 		Params:  defaultParams,
 	})
+}
+
+// GetTaskCreator 获取任务的构造函数
+func GetTaskCreator(name string) (core.TaskCreator, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	creator, ok := registry[name]
+	if !ok {
+		return nil, fmt.Errorf("task implementation '%s' not found", name)
+	}
+	return creator, nil
 }
 
 func GetTask(name string) (core.Task, error) {

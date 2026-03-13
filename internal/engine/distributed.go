@@ -4,14 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/go-redis/redis/v8"
 	"github.com/iceymoss/go-task/pkg/db"
+	"github.com/iceymoss/go-task/pkg/logger"
+
+	"github.com/go-redis/redis/v8"
+	"go.uber.org/zap"
 )
 
 const DefaultLeaderKeyTTL = 15
@@ -112,7 +114,7 @@ func (r *RedisLeaderElector) loop(ctx context.Context) {
 			// 退出前如果是 Leader，尝试释放锁
 			if r.IsLeader() {
 				if err := r.releaseLock(context.Background()); err != nil {
-					log.Printf("⚠️ [LeaderElector] release lock failed: %v", err)
+					logger.Info("⚠️ [LeaderElector] release lock failed", zap.Error(err))
 				}
 				r.setLeader(false)
 			}
@@ -121,7 +123,7 @@ func (r *RedisLeaderElector) loop(ctx context.Context) {
 			if r.IsLeader() {
 				// 已是 Leader，尝试续约
 				if err := r.renewLock(ctx); err != nil {
-					log.Printf("⚠️ [LeaderElector] renew lock failed: %v", err)
+					logger.Info("⚠️ [LeaderElector] renew lock failed", zap.Error(err))
 					// 续约失败时，下一轮会尝试重新抢占
 					r.setLeader(false)
 					if r.onStoppedLeading != nil {
@@ -132,12 +134,12 @@ func (r *RedisLeaderElector) loop(ctx context.Context) {
 				// 非 Leader，尝试抢占
 				ok, err := r.acquireLock(ctx)
 				if err != nil {
-					log.Printf("⚠️ [LeaderElector] acquire lock error: %v", err)
+					logger.Info("⚠️ [LeaderElector] acquire lock failed", zap.Error(err))
 					continue
 				}
 				if ok {
 					r.setLeader(true)
-					log.Printf("👑 [LeaderElector] became leader, id=%s", r.id)
+					logger.Info("👑 [LeaderElector] became leader", zap.Any("id", r.id))
 					if r.onStartedLeading != nil {
 						r.onStartedLeading()
 					}
@@ -225,11 +227,11 @@ func (s *Scheduler) EnableRedisLeaderElection(key string, ttl, renewInterval tim
 	client := db.GetRedisConn()
 
 	onStarted := func() {
-		log.Printf("👑 [Scheduler] This instance became leader, starting cron")
+		logger.Info("👑 [Scheduler] This instance became leader, starting cron")
 		s.cron.Start()
 	}
 	onStopped := func() {
-		log.Printf("👋 [Scheduler] Lost leadership, stopping cron")
+		logger.Info("👋 [Scheduler] Lost leadership, stopping cron")
 		s.cron.Stop()
 	}
 

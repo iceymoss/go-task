@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/iceymoss/go-task/pkg/logger"
@@ -42,6 +44,11 @@ const (
 	EventTypeDependencyMet EventType = "dependency_met" // 依赖满足
 )
 
+const (
+	EventBufferSize = 2000
+	eventWorkerNum  = 10
+)
+
 // Event 任务事件
 type Event struct {
 	Type      EventType       // 事件类型
@@ -68,12 +75,67 @@ func (f EventHandlerFunc) Handle(event *Event) {
 type EventManager struct {
 	handlers map[EventType][]EventHandler // 事件类型 -> 处理器列表
 	mu       sync.RWMutex                 // 保护 handlers 的并发访问
+
+	eventChan chan *Event    // 缓冲通道
+	wg        sync.WaitGroup // 用于优雅停机
+	closed    int32          // 是否已关闭
 }
 
-// NewEventManager 创建事件管理器
-func NewEventManager() *EventManager {
-	return &EventManager{
-		handlers: make(map[EventType][]EventHandler),
+// NewEventManager 创建事件管理器 (增加容量和 worker 数量参数)
+func NewEventManager(workerNum int, bufferSize int) *EventManager {
+	if workerNum <= 0 {
+		workerNum = 3
+	}
+	if bufferSize <= 0 {
+		bufferSize = 2000
+	}
+
+	em := &EventManager{
+		handlers:  make(map[EventType][]EventHandler),
+		eventChan: make(chan *Event, bufferSize),
+	}
+
+	// 启动固定数量的后台消费协程
+	for i := 0; i < workerNum; i++ {
+		em.wg.Add(1)
+		go em.workerLoop()
+	}
+
+	return em
+}
+
+// workerLoop 后台循环消费逻辑, 监听事件通道处理事件
+func (em *EventManager) workerLoop() {
+	defer em.wg.Done()
+
+	for event := range em.eventChan {
+		em.mu.RLock()
+		handlers := em.handlers[event.Type]
+		em.mu.RUnlock()
+
+		// 在同一个协程里依次执行处理器
+		for _, handler := range handlers {
+			// 单独捕获每个 handler
+			func(h EventHandler) {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Error("❌ [EventManager] Panic in event handler",
+							zap.Any("panic", r),
+							zap.String("event_type", string(event.Type)),
+							zap.String("task_name", event.TaskName),
+						)
+					}
+				}()
+				h.Handle(event)
+			}(handler)
+		}
+	}
+}
+
+func (em *EventManager) Stop() {
+	if atomic.CompareAndSwapInt32(&em.closed, 0, 1) {
+		close(em.eventChan) // 关闭通道，通知所有 worker 退出
+		em.wg.Wait()        // 等待所有仍在处理中的事件保存完毕（比如等待最后几条历史记录写入 DB）
 	}
 }
 
@@ -95,30 +157,19 @@ func (em *EventManager) OnFunc(eventType EventType, handlerFunc func(event *Even
 
 // Emit 发射事件
 func (em *EventManager) Emit(event *Event) {
-	em.mu.RLock()
-	handlers := em.handlers[event.Type]
-	em.mu.RUnlock()
-
-	// 在新的goroutine中执行所有处理器，避免阻塞
-	for _, handler := range handlers {
-		go func(h EventHandler) {
-			defer func() {
-				if r := recover(); r != nil {
-					logger.Error("❌ [EventManager] Panic in event handler",
-						zap.Any("panic", r),
-						zap.String("event_type", string(event.Type)),
-						zap.String("task_name", event.TaskName),
-					)
-				}
-			}()
-			h.Handle(event)
-		}(handler)
+	if atomic.LoadInt32(&em.closed) == 1 {
+		return
 	}
 
-	logger.Debug("📡 [EventManager] Emitted event",
-		zap.String("event_type", string(event.Type)),
-		zap.String("task_name", event.TaskName),
-	)
+	// 采用 select 结构非阻塞投递
+	// 如果极端情况下通道塞满了（比如数据库宕机导致消费极慢），直接丢弃事件或打印警告，绝不阻塞主调度流程！
+	select {
+	case em.eventChan <- event:
+		logger.Debug("📡 [EventManager] Emitted event to queue", zap.String("event_type", string(event.Type)))
+	default:
+		logger.Warn("⚠️ [EventManager] Event channel is full, dropping event! Consider increasing buffer size.",
+			zap.String("task_name", event.TaskName))
+	}
 }
 
 // Remove 移除指定事件类型的所有处理器
@@ -281,6 +332,20 @@ func NewWebhookEventHandler(config WebhookConfig) EventHandlerFunc {
 			zap.String("task_name", event.TaskName),
 			zap.Int("url_count", len(config.URLs)),
 		)
+	}
+}
+
+func DependencyMetEventHandler(scheduler *Scheduler) EventHandlerFunc {
+	return func(event *Event) {
+		depTaskName := event.TaskName
+		stat := scheduler.Stats.Get(depTaskName)
+
+		// 如果下游任务正处于等待上游的状态 (Waiting)，或者是纯事件触发的无时间任务 (Idle)
+		if stat != nil && (stat.Status == Waiting || stat.Status == Idle) {
+			log.Printf("🔔 [EventPush] Upstream finished! Pushing downstream task to queue: %s", depTaskName)
+			// 直接推给 Dispatcher 唤醒执行
+			scheduler.Dispatch(depTaskName)
+		}
 	}
 }
 

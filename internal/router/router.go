@@ -80,11 +80,11 @@ func RegisterRoute(cfg *conf.Config, scheduler *engine.Scheduler, staticFS fs.FS
 			errorTasks := 0
 
 			for _, stat := range stats {
-				if stat.Status == "Running" {
+				if stat.Status == engine.Running {
 					runningTasks++
-				} else if stat.Status == "Idle" && stat.LastResult == "Success" {
+				} else if stat.Status == engine.Idle && stat.LastResult == engine.LastResultSuccess {
 					successTasks++
-				} else if stat.Status == "Error" {
+				} else if stat.Status == engine.Error {
 					errorTasks++
 				}
 			}

@@ -246,41 +246,6 @@ func (dm *DependencyManager) buildDependencyChain(taskName string, visited map[s
 	*chain = append(*chain, taskName)
 }
 
-// WaitForDependencies 等待依赖任务完成
-func (dm *DependencyManager) WaitForDependencies(taskName string) error {
-	rule, exists := dm.GetDependencyRule(taskName)
-	if !exists || len(rule.DependsOn) == 0 {
-		return nil
-	}
-
-	if rule.CheckInterval == 0 {
-		rule.CheckInterval = 5 * time.Second
-	}
-
-	if rule.Timeout == 0 {
-		rule.Timeout = 30 * time.Minute
-	}
-
-	timeout := time.After(rule.Timeout)
-	ticker := time.NewTicker(rule.CheckInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-timeout:
-			return fmt.Errorf("timeout waiting for dependencies of task %s", taskName)
-		case <-ticker.C:
-			satisfied, err := dm.CheckDependencies(taskName)
-			if err != nil {
-				return err
-			}
-			if satisfied {
-				return nil
-			}
-		}
-	}
-}
-
 // GetDependentTasks 获取依赖于指定任务的所有任务
 func (dm *DependencyManager) GetDependentTasks(taskName string) []string {
 	dm.mu.RLock()

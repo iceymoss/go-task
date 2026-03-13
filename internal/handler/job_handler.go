@@ -573,7 +573,7 @@ func (h *JobHandler) jobToResponse(job *models.Job) JobResponse {
 	// 获取任务状态
 	status := "unknown"
 	if stat := h.scheduler.Stats.Get(job.Name); stat != nil {
-		status = stat.Status
+		status = string(stat.Status)
 	}
 
 	return JobResponse{

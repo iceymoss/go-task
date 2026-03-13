@@ -2,11 +2,13 @@ package engine
 
 import (
 	"container/heap"
-	"log"
+	"fmt"
 	"sync"
+
+	"github.com/iceymoss/go-task/pkg/logger"
 )
 
-// defaultWorkerNum 默认工作协程数量
+// DefaultWorkerNum 默认工作协程数量
 const defaultWorkerNum = 10
 
 // TaskQueue 简单优先级任务队列，使用内存优先队列 + 固定工作协程
@@ -20,7 +22,7 @@ type TaskQueue struct {
 	closed    bool           // 是否已关闭队列
 }
 
-// NewTaskQueue 创建任务队列
+// NewTaskQueue 创建任务队列, 会启动固定数量的 worker
 func NewTaskQueue(s *Scheduler, workerNum int) *TaskQueue {
 	if workerNum <= 0 {
 		workerNum = defaultWorkerNum
@@ -30,13 +32,19 @@ func NewTaskQueue(s *Scheduler, workerNum int) *TaskQueue {
 	pq := make(priorityQueue, 0)
 	heap.Init(&pq)
 
+	// 初始化任务队列
 	q := &TaskQueue{
 		scheduler: s,
 		workerNum: workerNum,
 		items:     &pq, // 指向堆
 	}
+
+	// 初始化条件变量
 	q.cond = sync.NewCond(&q.mu)
+
+	// 启动 worker
 	q.startWorkers()
+
 	return q
 }
 
@@ -57,8 +65,7 @@ func (q *TaskQueue) workerLoop(id int) {
 		if !ok {
 			return
 		}
-
-		log.Printf("🧵 [TaskQueue] Worker-%d handling job: %s (priority=%d)", id, item.Name, item.Priority)
+		logger.Info(fmt.Sprintf("🧵 [TaskQueue] Worker-%d handling job: %s (priority=%d)", id, item.Name, item.Priority))
 		q.scheduler.runTaskWithStats(item.Name)
 	}
 }
@@ -98,7 +105,9 @@ func (q *TaskQueue) Enqueue(name string, priority int) error {
 		Priority: priority,
 	})
 
+	// 唤醒一个等待的 worker
 	q.cond.Signal()
+
 	return nil
 }
 
