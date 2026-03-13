@@ -2,10 +2,10 @@ package tasks
 
 import (
 	"fmt"
-	"github.com/iceymoss/go-task/internal/conf"
 	"log"
 	"sync"
 
+	"github.com/iceymoss/go-task/internal/conf"
 	"github.com/iceymoss/go-task/internal/core"
 	"github.com/iceymoss/go-task/pkg/constants"
 )

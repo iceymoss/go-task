@@ -14,12 +14,16 @@ import (
 	"github.com/iceymoss/go-task/pkg/db"
 )
 
+const DefaultLeaderKeyTTL = 15
+
 // LeaderElector 抽象的选主接口
 type LeaderElector interface {
 	// Start 启动选主循环（非阻塞或长时间阻塞均可，由实现决定）
 	Start(ctx context.Context) error
+
 	// Stop 停止选主循环
 	Stop(ctx context.Context) error
+
 	// IsLeader 当前实例是否为 Leader
 	IsLeader() bool
 }
@@ -27,19 +31,19 @@ type LeaderElector interface {
 // RedisLeaderElector 基于 Redis 的简单选主实现
 // 使用一个带 TTL 的 key 做 Leader 锁，value 为实例 ID。
 type RedisLeaderElector struct {
-	client        *redis.Client
-	key           string
-	id            string
-	ttl           time.Duration
-	renewInterval time.Duration
+	client        *redis.Client // Redis 客户端
+	key           string        // Redis 锁的 key
+	id            string        // 实例 ID
+	ttl           time.Duration // 锁的 TTL
+	renewInterval time.Duration // 锁续约的间隔
 
-	onStartedLeading func()
-	onStoppedLeading func()
+	onStartedLeading func() // 选主成功时调用
+	onStoppedLeading func() // 停止选主时调用
 
-	isLeader int32
+	isLeader int32 // 是否为 Leader
 
-	mu      sync.RWMutex
-	started bool
+	mu      sync.RWMutex // 锁
+	started bool         // 是否已启动
 }
 
 // NewRedisLeaderElector 创建 Redis 选主器
@@ -51,12 +55,13 @@ func NewRedisLeaderElector(
 	onStoppedLeading func(),
 ) *RedisLeaderElector {
 	if ttl <= 0 {
-		ttl = 15 * time.Second
+		ttl = DefaultLeaderKeyTTL * time.Second
 	}
 	if renewInterval <= 0 || renewInterval >= ttl {
 		renewInterval = ttl / 2
 	}
 
+	// 生成实例id
 	id := defaultInstanceID()
 
 	return &RedisLeaderElector{
@@ -95,7 +100,10 @@ func (r *RedisLeaderElector) Start(ctx context.Context) error {
 
 // loop 主循环：尝试抢占锁、续约、检测是否失去 Leader
 func (r *RedisLeaderElector) loop(ctx context.Context) {
+	// 续约间隔
 	ticker := time.NewTicker(r.renewInterval)
+
+	// 停止时停止续约
 	defer ticker.Stop()
 
 	for {
@@ -179,7 +187,7 @@ func (r *RedisLeaderElector) releaseLock(ctx context.Context) error {
 	}
 
 	val, err := r.client.Get(ctx, r.key).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return nil
 	}
 	if err != nil {

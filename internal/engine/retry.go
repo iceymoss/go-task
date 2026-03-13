@@ -243,22 +243,3 @@ func RetryWithPolicy(retryManager *RetryManager, taskName string) JobWrapper {
 		}
 	}
 }
-
-// ==================== 全局实例 ====================
-
-var (
-	globalEventManager *EventManager
-	eventManagerOnce   sync.Once
-)
-
-// SetGlobalEventManager 设置全局事件管理器
-func SetGlobalEventManager(em *EventManager) {
-	eventManagerOnce.Do(func() {
-		globalEventManager = em
-	})
-}
-
-// GetGlobalEventManager 获取全局事件管理器
-func GetGlobalEventManager() *EventManager {
-	return globalEventManager
-}

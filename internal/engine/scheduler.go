@@ -304,13 +304,13 @@ func (s *Scheduler) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.leaderCancel = cancel
 
-	go func() {
-		if err := s.leaderElector.Start(ctx); err != nil {
-			// 选主失败时，降级为单机模式，直接启动 cron
-			log.Printf("⚠️ [Scheduler] Leader election start failed, fallback to single-node: %v", err)
-			s.cron.Start()
-		}
-	}()
+	// 直接调用 Start
+	err := s.leaderElector.Start(ctx)
+	if err != nil {
+		// 绝对不能 fallback 到 s.cron.Start() 如果启动多实例，会导致重复执行
+		// 应该直接 Fatal，让程序起不来，引起运维注意，防止脑裂。
+		log.Fatalf("[Scheduler] Fatal error: Leader election failed to start. Aborting to prevent split-brain. Error: %v", err)
+	}
 }
 func (s *Scheduler) Stop() {
 	if s.leaderCancel != nil {

@@ -33,7 +33,8 @@ func main() {
 
 	log.Printf("🌐 Dashboard running at http://localhost%s", port)
 	if err := srv.Run(port); err != nil {
-		logger.Fatal("❌ Server error", zap.Error(err))
+		logger.Error("❌ Server error", zap.Error(err))
+		return
 	}
 
 }
