@@ -14,10 +14,10 @@ import (
 )
 
 type Register struct {
-	task     core.Task
-	params   map[string]any
-	chain    Chain
-	priority int
+	task     core.Task      // 任务实现
+	params   map[string]any // 任务参数
+	chain    Chain          // 任务链, 可以加入日志，重试，限流，日志，指标，历史记录等操作
+	priority int            // 任务优先级
 }
 
 type Scheduler struct {

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"container/heap"
 	"log"
 	"sync"
 )
@@ -8,19 +9,12 @@ import (
 // defaultWorkerNum 默认工作协程数量
 const defaultWorkerNum = 10
 
-// TaskItem 表示队列中的一个任务
-type TaskItem struct {
-	Name     string // 任务名称
-	Priority int    // 优先级，值越大优先级越高
-}
-
 // TaskQueue 简单优先级任务队列，使用内存优先队列 + 固定工作协程
 type TaskQueue struct {
-	scheduler *Scheduler // 引用调度器以执行任务
-
+	scheduler *Scheduler     // 引用调度器以执行任务
 	mu        sync.Mutex     // 保护 items 和 closed 的并发访问
 	cond      *sync.Cond     // 条件变量，用于通知 worker 有新任务
-	items     []TaskItem     // 任务列表
+	items     *priorityQueue // 任务列表
 	workerNum int            // worker 数量
 	wg        sync.WaitGroup // 等待 worker 退出
 	closed    bool           // 是否已关闭队列
@@ -31,10 +25,15 @@ func NewTaskQueue(s *Scheduler, workerNum int) *TaskQueue {
 	if workerNum <= 0 {
 		workerNum = defaultWorkerNum
 	}
+
+	// 初始化堆
+	pq := make(priorityQueue, 0)
+	heap.Init(&pq)
+
 	q := &TaskQueue{
 		scheduler: s,
 		workerNum: workerNum,
-		items:     make([]TaskItem, 0),
+		items:     &pq, // 指向堆
 	}
 	q.cond = sync.NewCond(&q.mu)
 	q.startWorkers()
@@ -69,25 +68,17 @@ func (q *TaskQueue) pop() (TaskItem, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	for len(q.items) == 0 && !q.closed {
+	for len(*q.items) == 0 && !q.closed {
 		q.cond.Wait()
 	}
 
-	if q.closed && len(q.items) == 0 {
+	if q.closed && len(*q.items) == 0 {
 		return TaskItem{}, false
 	}
 
-	// 找到优先级最高的任务（值越大优先级越高）
-	maxIdx := 0
-	for i := 1; i < len(q.items); i++ {
-		if q.items[i].Priority > q.items[maxIdx].Priority {
-			maxIdx = i
-		}
-	}
-
-	item := q.items[maxIdx]
-	// 删除该元素
-	q.items = append(q.items[:maxIdx], q.items[maxIdx+1:]...)
+	// 使用 heap.Pop 直接获取最高优先级的元素，内部会自动平衡树结构
+	// 无需 for 循环遍历整个切片寻找最大值
+	item := heap.Pop(q.items).(TaskItem)
 
 	return item, true
 }
@@ -101,10 +92,12 @@ func (q *TaskQueue) Enqueue(name string, priority int) error {
 		return nil
 	}
 
-	q.items = append(q.items, TaskItem{
+	// 使用 heap.Push 插入元素，内部会自动调整树结构保持最大堆形态
+	heap.Push(q.items, TaskItem{
 		Name:     name,
 		Priority: priority,
 	})
+
 	q.cond.Signal()
 	return nil
 }

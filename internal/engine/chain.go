@@ -257,8 +257,8 @@ type CircuitBreakerPolicy interface {
 
 // SimpleCircuitBreaker 简单的熔断器
 type SimpleCircuitBreaker struct {
-	maxFailures  int
-	failureCount int32
+	maxFailures  int   // 最大失败次数
+	failureCount int32 // 当前失败次数
 	state        int32 // 0: closed, 1: open, 2: half-open
 }
 
@@ -269,6 +269,7 @@ func NewSimpleCircuitBreaker(maxFailures int) *SimpleCircuitBreaker {
 	}
 }
 
+// Allow 检查是否允许执行任务
 func (cb *SimpleCircuitBreaker) Allow() bool {
 	if atomic.LoadInt32(&cb.state) == 1 {
 		return false // open
@@ -276,6 +277,7 @@ func (cb *SimpleCircuitBreaker) Allow() bool {
 	return true
 }
 
+// RecordSuccess 记录成功
 func (cb *SimpleCircuitBreaker) RecordSuccess() {
 	atomic.StoreInt32(&cb.failureCount, 0)
 	if atomic.LoadInt32(&cb.state) == 2 {
@@ -283,6 +285,7 @@ func (cb *SimpleCircuitBreaker) RecordSuccess() {
 	}
 }
 
+// RecordFailure 记录失败
 func (cb *SimpleCircuitBreaker) RecordFailure() {
 	if atomic.AddInt32(&cb.failureCount, 1) >= int32(cb.maxFailures) {
 		atomic.StoreInt32(&cb.state, 1) // open
