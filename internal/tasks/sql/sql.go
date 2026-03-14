@@ -5,27 +5,29 @@ import (
 	"fmt"
 
 	"github.com/iceymoss/go-task/internal/core"
+	"github.com/iceymoss/go-task/internal/tasks/base_task"
+	"github.com/iceymoss/go-task/pkg/constants"
 	"github.com/iceymoss/go-task/pkg/db"
 	"github.com/iceymoss/go-task/pkg/logger"
+
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
-const TaskName = "sql"
+const TaskName = "sql:sql"
 
 // SqlTask SQL 查询任务
-type SqlTask struct{}
-
-func init() {
-	// tasks.Register(TaskName, NewSqlTask)
+type SqlTask struct {
+	base_task.BaseTask
 }
 
 func NewSqlTask() core.Task {
-	return &SqlTask{}
-}
-
-func (t *SqlTask) Identifier() string {
-	return TaskName
+	return &SqlTask{
+		BaseTask: base_task.BaseTask{
+			Name:     TaskName,
+			TaskType: constants.TaskTypeSYSTEM,
+		},
+	}
 }
 
 // SqlParams 参数结构

@@ -7,26 +7,27 @@ import (
 	"strings"
 
 	"github.com/iceymoss/go-task/internal/core"
+	"github.com/iceymoss/go-task/internal/tasks/base_task"
+	"github.com/iceymoss/go-task/pkg/constants"
 	"github.com/iceymoss/go-task/pkg/logger"
+
 	"go.uber.org/zap"
 )
 
-const TaskName = "shell"
+const ShellTaskName = "shell:shell"
 
 // ShellTask Shell 命令任务
-type ShellTask struct{}
-
-func init() {
-	// 注册到任务管理器（虽然主要是通过工厂使用，但也支持直接注册）
-	// tasks.Register(TaskName, NewShellTask)
+type ShellTask struct {
+	base_task.BaseTask
 }
 
 func NewShellTask() core.Task {
-	return &ShellTask{}
-}
-
-func (t *ShellTask) Identifier() string {
-	return TaskName
+	return &ShellTask{
+		BaseTask: base_task.BaseTask{
+			Name:     ShellTaskName,
+			TaskType: constants.TaskTypeSYSTEM,
+		},
+	}
 }
 
 // ShellParams 参数结构

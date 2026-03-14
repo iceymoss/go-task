@@ -4,7 +4,6 @@ import (
 	"log"
 
 	"github.com/iceymoss/go-task/internal/conf"
-	_ "github.com/iceymoss/go-task/internal/resgister"
 	"github.com/iceymoss/go-task/internal/server"
 	"github.com/iceymoss/go-task/pkg/logger"
 	"github.com/iceymoss/go-task/web"

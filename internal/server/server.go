@@ -34,14 +34,18 @@ func NewServer(cfg *conf.Config, staticFS *embed.FS) *Server {
 		logger.Fatal("Failed to register MySQL models: %v", zap.Error(err))
 	}
 
-	// 初始化任务调度器
-	scheduler := engine.NewScheduler()
+	// 初始化注册表
+	registry := engine.NewTaskRegistry()
+
+	// 初始化调度内核，并将装满任务的注册表注入进去
+	scheduler := engine.NewScheduler(registry)
+
 	// 启用基于 Redis 的分布式选主（多实例部署时，只有 Leader 会真正执行定时任务）
 	// key 可以根据业务环境自定义
 	scheduler.EnableRedisLeaderElection("go-task:scheduler:leader", 15*time.Second, 5*time.Second)
 
-	// 加载任务到调度器
-	tasks.ApplyJobs(scheduler, cfg)
+	// 加载所有任务
+	tasks.LoadAllTasks(registry, scheduler, cfg)
 
 	return &Server{
 		engine:    router.RegisterRoute(cfg, scheduler, *staticFS),

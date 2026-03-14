@@ -7,41 +7,47 @@ import (
 	"time"
 
 	"github.com/iceymoss/go-task/internal/core"
-	"github.com/iceymoss/go-task/internal/tasks"
 	"github.com/iceymoss/go-task/pkg/logger"
 
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 )
 
-type Register struct {
+const (
+	defaultTaskTimeout = 2 * time.Hour
+)
+
+type JobDefinition struct {
 	creator  core.TaskCreator // 任务实现
 	params   map[string]any   // 任务参数
 	chain    Chain            // 任务链, 可以加入日志，重试，限流，日志，指标，历史记录等操作
 	priority int              // 任务优先级
+	timeout  time.Duration    // 任务超时时间
 }
 
 type Scheduler struct {
-	cron              *cron.Cron          // 任务调度器
-	Stats             *StatManager        // 任务状态管理器
-	DependencyManager *DependencyManager  // 任务依赖管理器
-	EventManager      *EventManager       // 事件管理器
-	RetryManager      *RetryManager       // 重试管理器
-	TaskQueue         *TaskQueue          // 任务队列（可选，支持优先级和限流）
-	leaderElector     LeaderElector       // 选主器（可选，支持分布式部署）
-	leaderCancel      context.CancelFunc  // 选主停止函数
-	registered        map[string]Register // 已注册的任务信息，key 是 uniqueJobName
-	mu                sync.RWMutex        // 保护 registered 和任务状态的并发访问
+	cron              *cron.Cron               // 任务调度器
+	Stats             *StatManager             // 任务状态管理器
+	DependencyManager *DependencyManager       // 任务依赖管理器
+	EventManager      *EventManager            // 事件管理器
+	RetryManager      *RetryManager            // 重试管理器
+	TaskQueue         *TaskQueue               // 任务队列（可选，支持优先级和限流）
+	leaderElector     LeaderElector            // 选主器（可选，支持分布式部署）
+	leaderCancel      context.CancelFunc       // 选主停止函数
+	registry          *TaskRegistry            // 调度器持有一个菜单(注册表)
+	jobDefinition     map[string]JobDefinition // 存放具体的任务订单
+	mu                sync.RWMutex             // 保护 registered 和任务状态的并发访问
 }
 
-func NewScheduler() *Scheduler {
+func NewScheduler(registry *TaskRegistry) *Scheduler {
 	scheduler := &Scheduler{
 		cron:              cron.New(cron.WithSeconds()),
 		Stats:             NewStatManager(),
 		DependencyManager: NewDependencyManager(),
 		EventManager:      NewEventManager(eventWorkerNum, EventBufferSize),
 		RetryManager:      NewRetryManager(),
-		registered:        make(map[string]Register),
+		jobDefinition:     make(map[string]JobDefinition),
+		registry:          registry,
 	}
 
 	// 设置全局事件管理器
@@ -73,20 +79,21 @@ func NewScheduler() *Scheduler {
 }
 
 // buildDefaultChain 为任务构建默认的执行链：
-// Logging + Metrics + RetryWithPolicy
+// Logging + Metrics + RetryWithPolicy + Timeout
 func (s *Scheduler) buildDefaultChain(taskName string) Chain {
 	return Chain{}.
 		Then(
 			Logging(taskName),
 			Metrics(taskName),
 			RetryWithPolicy(s.RetryManager, taskName),
+			Timeout(defaultTaskTimeout),
 		)
 }
 
 // AddJob 添加任务
-func (s *Scheduler) AddJob(cronExpr, taskName, uniqueJobName string, params map[string]any, source string) error {
+func (s *Scheduler) AddJob(cronExpr, uniqueJobName string, params map[string]any, source string) error {
 	// 获取任务实现
-	creator, err := tasks.GetTaskCreator(taskName)
+	creator, err := s.registry.Get(uniqueJobName)
 	if err != nil {
 		return err
 	}
@@ -101,12 +108,14 @@ func (s *Scheduler) AddJob(cronExpr, taskName, uniqueJobName string, params map[
 	})
 
 	// 保存引用以便手动触发
-	s.registered[uniqueJobName] = Register{
+	s.mu.Lock()
+	s.jobDefinition[uniqueJobName] = JobDefinition{
 		creator:  creator,
 		params:   params,
 		chain:    s.buildDefaultChain(uniqueJobName),
 		priority: 0,
 	}
+	s.mu.Unlock()
 
 	// 包装执行逻辑
 	wrapper := func() {
@@ -127,16 +136,20 @@ func (s *Scheduler) AddJob(cronExpr, taskName, uniqueJobName string, params map[
 func (s *Scheduler) runTaskWithStats(name string) {
 	// 读取注册信息
 	s.mu.RLock()
-	reg, ok := s.registered[name]
+	reg, ok := s.jobDefinition[name]
 	s.mu.RUnlock()
 	if !ok {
-		logger.Info("⚠️ [Schedule] Job not registered", zap.Any("name", name))
+		logger.Info("⚠️ [Schedule] Job not jobDefinition", zap.Any("name", name))
 		return
 	}
 
 	task := reg.creator()
 	params := reg.params
 	chain := reg.chain
+	timeout := reg.timeout
+	if timeout <= 0 {
+		timeout = defaultTaskTimeout
+	}
 
 	stat := s.Stats.Get(name)
 	ctx := context.Background()
@@ -213,7 +226,7 @@ func (s *Scheduler) runTaskWithStats(name string) {
 
 // ManualRun 手动触发
 func (s *Scheduler) ManualRun(uniqueJobName string) error {
-	reg, ok := s.registered[uniqueJobName]
+	reg, ok := s.jobDefinition[uniqueJobName]
 	if !ok {
 		return fmt.Errorf("job not found")
 	}
@@ -228,7 +241,7 @@ func (s *Scheduler) ManualRun(uniqueJobName string) error {
 }
 
 // AddJobWithDependency 添加带依赖的任务
-func (s *Scheduler) AddJobWithDependency(cronExpr, taskName, uniqueJobName string, params map[string]any, source string, dependencyRule *DependencyRule) error {
+func (s *Scheduler) AddJobWithDependency(cronExpr, uniqueJobName string, params map[string]any, source string, dependencyRule *DependencyRule) error {
 	// 先添加依赖规则
 	if dependencyRule != nil {
 		if err := s.DependencyManager.AddDependency(dependencyRule); err != nil {
@@ -237,7 +250,7 @@ func (s *Scheduler) AddJobWithDependency(cronExpr, taskName, uniqueJobName strin
 	}
 
 	// 添加任务
-	return s.AddJob(cronExpr, taskName, uniqueJobName, params, source)
+	return s.AddJob(cronExpr, uniqueJobName, params, source)
 }
 
 // GetDependencyChain 获取任务的依赖链
@@ -256,7 +269,7 @@ func (s *Scheduler) Dispatch(name string) {
 	// 加入任务队列后，TaskQueue初始化时开启的worker会自动从队列中获取任务进行处理
 
 	s.mu.RLock()
-	reg, ok := s.registered[name]
+	reg, ok := s.jobDefinition[name]
 	s.mu.RUnlock()
 	if !ok {
 		return
@@ -346,10 +359,10 @@ func (s *Scheduler) SetPriority(taskName string, priority int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	reg, ok := s.registered[taskName]
+	reg, ok := s.jobDefinition[taskName]
 	if !ok {
 		return
 	}
 	reg.priority = priority
-	s.registered[taskName] = reg
+	s.jobDefinition[taskName] = reg
 }

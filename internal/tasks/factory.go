@@ -5,7 +5,7 @@ import (
 
 	"github.com/iceymoss/go-task/internal/core"
 	"github.com/iceymoss/go-task/internal/tasks/email"
-	"github.com/iceymoss/go-task/internal/tasks/http"
+	"github.com/iceymoss/go-task/internal/tasks/network"
 	"github.com/iceymoss/go-task/internal/tasks/shell"
 	"github.com/iceymoss/go-task/internal/tasks/sql"
 )
@@ -16,7 +16,7 @@ func GetTaskByType(taskType string) (core.Task, error) {
 	case "shell":
 		return shell.NewShellTask(), nil
 	case "http":
-		return http.NewHttpTask(), nil
+		return network.NewHttpTask(), nil
 	case "email":
 		return email.NewEmailTask(), nil
 	case "sql":

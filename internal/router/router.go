@@ -61,7 +61,6 @@ func RegisterRoute(cfg *conf.Config, scheduler *engine.Scheduler, staticFS fs.FS
 		api.DELETE("/jobs/:id", jobHandler.DeleteJob)
 		api.POST("/jobs/:id/enable", jobHandler.EnableJob)
 		api.POST("/jobs/:id/disable", jobHandler.DisableJob)
-		api.POST("/jobs/:id/test", jobHandler.TestJob)
 		api.GET("/jobs/:id/logs", jobHandler.GetJobLogs)
 		api.POST("/jobs/validate-cron", jobHandler.ValidateCron)
 		api.GET("/jobs/templates", jobHandler.GetJobTemplates)

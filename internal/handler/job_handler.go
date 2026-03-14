@@ -1,9 +1,7 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -192,7 +190,6 @@ func (h *JobHandler) CreateJob(c *gin.Context) {
 		if err := h.scheduler.AddJob(
 			job.CronExpr,
 			job.Name,
-			job.Name,
 			req.Params,
 			job.Source,
 		); err != nil {
@@ -359,51 +356,6 @@ func (h *JobHandler) DisableJob(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": h.jobToResponse(&job)})
-}
-
-// TestJob 测试执行任务
-func (h *JobHandler) TestJob(c *gin.Context) {
-	id := c.Param("id")
-	var job models.Job
-	if err := h.db.First(&job, id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	// 获取任务实现
-	task, err := tasks.GetTask(job.Name)
-	if err != nil {
-		// 尝试通过类型创建
-		task, err = tasks.GetTaskByType(job.Type)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("failed to get task: %v", err)})
-			return
-		}
-	}
-
-	// 解析参数
-	var params map[string]any
-	if job.Params != "" {
-		json.Unmarshal([]byte(job.Params), &params)
-	}
-
-	// 执行任务
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(job.Timeout)*time.Second)
-		defer cancel()
-
-		if err := task.Run(ctx, params); err != nil {
-			fmt.Printf("Test job failed: %v\n", err)
-		} else {
-			fmt.Println("Test job completed successfully")
-		}
-	}()
-
-	c.JSON(http.StatusOK, gin.H{"message": "job test started"})
 }
 
 // GetJobLogs 获取任务执行日志
@@ -609,7 +561,6 @@ func (h *JobHandler) reloadJobToScheduler(job *models.Job) error {
 	if job.Enable {
 		return h.scheduler.AddJob(
 			job.CronExpr,
-			job.Name,
 			job.Name,
 			params,
 			job.Source,

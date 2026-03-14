@@ -6,12 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/iceymoss/go-task/pkg/constants"
 	"log"
 	"strings"
 	"time"
 
 	"github.com/iceymoss/go-task/internal/core"
-	"github.com/iceymoss/go-task/internal/tasks"
+	"github.com/iceymoss/go-task/internal/tasks/base_task"
 	"github.com/iceymoss/go-task/pkg/db"
 	"github.com/iceymoss/go-task/pkg/db/objects"
 
@@ -21,15 +22,22 @@ import (
 	"gorm.io/gorm"
 )
 
-// TechSummarizerTask 结构体
-type TechSummarizerTask struct{}
+const (
+	aiTecSummarizerTaskName = "ai:tech_summarizer"
+)
 
-func init() {
-	tasks.Register("ai:tech_summarizer", NewTechSummarizerTask)
+// TechSummarizerTask 结构体
+type TechSummarizerTask struct {
+	base_task.BaseTask
 }
 
 func NewTechSummarizerTask() core.Task {
-	return &TechSummarizerTask{}
+	return &TechSummarizerTask{
+		BaseTask: base_task.BaseTask{
+			Name:     aiTecSummarizerTaskName,
+			TaskType: constants.TaskTypeSYSTEM,
+		},
+	}
 }
 
 func (t *TechSummarizerTask) Identifier() string {
@@ -109,15 +117,15 @@ func (t *TechSummarizerTask) Run(ctx context.Context, params map[string]any) err
 			now := time.Now()
 			// 5. 存入数据库
 			article := &objects.SysArticle{
-				Title:       item.Title,
-				Link:        item.Link,
-				ContentHash: hash,
-				AITitle:     analysis.Title,   // AI 的新标题
-				Summary:     analysis.Summary, // AI 的深度总结
-				Topics:      analysis.Topics,  // GORM 自动转为 JSON ["Go", "AI"]
-				Source:      feed.Title,
-				CreatedAt:   now,
-				UpdatedAt:   now,
+				Title:           item.Title,
+				Link:            item.Link,
+				ContentHash:     hash,
+				AITitle:         analysis.Title,   // AI 的新标题
+				Summary:         analysis.Summary, // AI 的深度总结
+				Topics:          analysis.Topics,  // GORM 自动转为 JSON ["Go", "AI"]
+				Source:          feed.Title,
+				CreatedAt:       now,
+				UpdatedAt:       now,
 				PublishedParsed: now,
 			}
 			if err := dbConn.Create(article).Error; err != nil {

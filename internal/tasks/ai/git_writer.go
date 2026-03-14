@@ -17,7 +17,8 @@ import (
 	"time"
 
 	"github.com/iceymoss/go-task/internal/core"
-	"github.com/iceymoss/go-task/internal/tasks"
+	"github.com/iceymoss/go-task/internal/tasks/base_task"
+	"github.com/iceymoss/go-task/pkg/constants"
 	"github.com/iceymoss/go-task/pkg/db"
 	"github.com/iceymoss/go-task/pkg/db/objects"
 	"github.com/iceymoss/go-task/pkg/logger"
@@ -28,23 +29,22 @@ import (
 )
 
 const (
-	TaskName = "ai:writer"
-	LastID   = TaskName + ":last_id"
+	aiWriterTaskName = "ai:writer"
+	LastID           = aiWriterTaskName + ":last_id"
 )
 
 // WriterTask AI 写作任务
-type WriterTask struct{}
-
-func init() {
-	tasks.Register(TaskName, NewWriterTask)
+type WriterTask struct {
+	base_task.BaseTask
 }
 
 func NewWriterTask() core.Task {
-	return &WriterTask{}
-}
-
-func (t *WriterTask) Identifier() string {
-	return TaskName
+	return &WriterTask{
+		BaseTask: base_task.BaseTask{
+			Name:     aiWriterTaskName,
+			TaskType: constants.TaskTypeSYSTEM,
+		},
+	}
 }
 
 // WriterParams 参数结构体

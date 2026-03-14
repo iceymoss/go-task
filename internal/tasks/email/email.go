@@ -7,25 +7,27 @@ import (
 	"strings"
 
 	"github.com/iceymoss/go-task/internal/core"
+	"github.com/iceymoss/go-task/internal/tasks/base_task"
+	"github.com/iceymoss/go-task/pkg/constants"
 	"github.com/iceymoss/go-task/pkg/logger"
+
 	"go.uber.org/zap"
 )
 
-const TaskName = "email"
+const TaskName = "email:email"
 
 // EmailTask 邮件发送任务
-type EmailTask struct{}
-
-func init() {
-	// tasks.Register(TaskName, NewEmailTask)
+type EmailTask struct {
+	base_task.BaseTask
 }
 
 func NewEmailTask() core.Task {
-	return &EmailTask{}
-}
-
-func (t *EmailTask) Identifier() string {
-	return TaskName
+	return &EmailTask{
+		BaseTask: base_task.BaseTask{
+			Name:     TaskName,
+			TaskType: constants.TaskTypeSYSTEM,
+		},
+	}
 }
 
 // EmailParams 参数结构

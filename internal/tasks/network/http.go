@@ -1,4 +1,4 @@
-package http
+package network
 
 import (
 	"bytes"
@@ -10,19 +10,19 @@ import (
 	"time"
 
 	"github.com/iceymoss/go-task/internal/core"
+	"github.com/iceymoss/go-task/internal/tasks/base_task"
+	"github.com/iceymoss/go-task/pkg/constants"
 	"github.com/iceymoss/go-task/pkg/logger"
+
 	"go.uber.org/zap"
 )
 
-const TaskName = "http"
+const HttpReqTaskName = "network:http:request"
 
 // HttpTask HTTP 请求任务
 type HttpTask struct {
 	client *http.Client
-}
-
-func init() {
-	// tasks.Register(TaskName, NewHttpTask)
+	base_task.BaseTask
 }
 
 func NewHttpTask() core.Task {
@@ -30,11 +30,12 @@ func NewHttpTask() core.Task {
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		BaseTask: base_task.BaseTask{
+			Name:          HttpReqTaskName,
+			DefaultParams: map[string]any{},
+			TaskType:      constants.TaskTypeSYSTEM,
+		},
 	}
-}
-
-func (t *HttpTask) Identifier() string {
-	return TaskName
 }
 
 // HttpParams 参数结构

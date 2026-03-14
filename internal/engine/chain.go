@@ -87,22 +87,35 @@ func SkipIfStillRunning(logger *zap.Logger) JobWrapper {
 	}
 }
 
-// Timeout 设置任务超时时间
+// Timeout 设置任务超时时间的包装器
 func Timeout(timeout time.Duration) JobWrapper {
 	return func(next JobFunc) JobFunc {
 		return func(ctx context.Context) error {
-			ctx, cancel := context.WithTimeout(ctx, timeout)
+			// 基于父 ctx 派生出一个带有超时的 context
+			timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+			// defer cancel() 极其重要：无论任务是成功完成还是超时，都要及时释放 Context 占用的底层资源
 			defer cancel()
 
+			// 创建一个接收错误的通道
+			// 容量必须设为 1
+			// 如果设为无缓冲通道 (make(chan error))，当触发超时退出后，如果实际任务在未来的某一天跑完了，
+			// 它往 done 里写数据时会因为没有人接收而永远阻塞，导致 Goroutine 永久泄漏！
 			done := make(chan error, 1)
+
+			// 开启一个后台协程去真正执行任务
 			go func() {
-				done <- next(ctx)
+				// 注意：这里把带有超时控制的 timeoutCtx 传给了下一层
+				done <- next(timeoutCtx)
 			}()
 
+			// 使用 select 监听谁先到来
 			select {
 			case err := <-done:
+				// 任务在超时时间内顺利（或报错）跑完了
 				return err
-			case <-ctx.Done():
+
+			case <-timeoutCtx.Done():
+				// 时间到了，任务还没跑完。timeoutCtx.Done() 的通道会收到关闭信号
 				return fmt.Errorf("job timed out after %v", timeout)
 			}
 		}
