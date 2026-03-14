@@ -82,16 +82,19 @@ type EventManager struct {
 	wg        sync.WaitGroup // 用于优雅停机
 	closed    int32          // 是否已关闭
 
+	logger Logger
+
 	workerNum  int
 	bufferSize int
 }
 
 // NewEventManager 创建事件管理器
-func NewEventManager(opts ...EventOption) *EventManager {
+func NewEventManager(logger Logger, opts ...EventOption) *EventManager {
 	em := &EventManager{
 		handlers:   make(map[EventType][]EventHandler),
 		workerNum:  eventWorkerNum,
 		bufferSize: EventBufferSize,
+		logger:     logger,
 	}
 
 	// 应用用户传入的配置选项进行覆盖
@@ -124,10 +127,10 @@ func (em *EventManager) workerLoop() {
 			func(h EventHandler) {
 				defer func() {
 					if r := recover(); r != nil {
-						logger.Error("❌ [EventManager] Panic in event handler",
-							zap.Any("panic", r),
-							zap.String("event_type", string(event.Type)),
-							zap.String("task_name", event.TaskName),
+						em.logger.Error("❌ [EventManager] Panic in event handler",
+							"panic", r,
+							"event_type", string(event.Type),
+							"task_name", event.TaskName,
 						)
 					}
 				}()
@@ -150,9 +153,7 @@ func (em *EventManager) On(eventType EventType, handler EventHandler) {
 	defer em.mu.Unlock()
 
 	em.handlers[eventType] = append(em.handlers[eventType], handler)
-	logger.Info("📡 [EventManager] Registered event handler",
-		zap.String("event_type", string(eventType)),
-	)
+	em.logger.Info("📡 [EventManager] Registered event handler", "event_type", string(eventType))
 }
 
 // OnFunc 注册函数类型的事件处理器
@@ -170,10 +171,9 @@ func (em *EventManager) Emit(event *Event) {
 	// 如果极端情况下通道塞满了（比如数据库宕机导致消费极慢），直接丢弃事件或打印警告，绝不阻塞主调度流程！
 	select {
 	case em.eventChan <- event:
-		logger.Debug("📡 [EventManager] Emitted event to queue", zap.String("event_type", string(event.Type)))
+		em.logger.Debug("📡 [EventManager] Emitted event to queue", "event_type", string(event.Type))
 	default:
-		logger.Warn("⚠️ [EventManager] Event channel is full, dropping event! Consider increasing buffer size.",
-			zap.String("task_name", event.TaskName))
+		em.logger.Warn("⚠️ [EventManager] Event channel is full, dropping event! Consider increasing buffer size.", "task_name", event.TaskName)
 	}
 }
 
@@ -188,39 +188,39 @@ func (em *EventManager) Remove(eventType EventType) {
 // ==================== 预定义的事件处理器 ====================
 
 // LoggingEventHandler 记录事件日志
-func LoggingEventHandler() EventHandlerFunc {
+func LoggingEventHandler(log Logger) EventHandlerFunc {
 	return func(event *Event) {
-		fields := []zap.Field{
-			zap.String("event_type", string(event.Type)),
-			zap.String("task_name", event.TaskName),
-			zap.Time("timestamp", event.TimeStamp),
+		fields := []any{
+			"event_type", string(event.Type),
+			"task_name", event.TaskName,
+			"timestamp", event.TimeStamp,
 		}
 
 		if event.Error != nil {
-			fields = append(fields, zap.Error(event.Error))
+			fields = append(fields, "error", event.Error)
 		}
 
 		switch event.Type {
 		case EventTypeBeforeJob:
-			logger.Info("🚀 [Event] Job starting", fields...)
+			log.Info("🚀 [Event] Job starting", fields...)
 		case EventTypeAfterJob:
-			logger.Info("✅ [Event] Job completed", fields...)
+			log.Info("✅ [Event] Job completed", fields...)
 		case EventTypeJobError:
-			logger.Error("❌ [Event] Job failed", fields...)
+			log.Error("❌ [Event] Job failed", fields...)
 		case EventTypeJobPanic:
-			logger.Error("💥 [Event] Job panicked", fields...)
+			log.Error("💥 [Event] Job panicked", fields...)
 		case EventTypeJobSkipped:
-			logger.Info("⏭️ [Event] Job skipped", fields...)
+			log.Info("⏭️ [Event] Job skipped", fields...)
 		case EventTypeJobRetry:
-			logger.Warn("🔄 [Event] Job retrying", fields...)
+			log.Warn("🔄 [Event] Job retrying", fields...)
 		case EventTypeDependencyMet:
-			logger.Info("✅ [Event] Dependencies met", fields...)
+			log.Info("✅ [Event] Dependencies met", fields...)
 		}
 	}
 }
 
 // MetricsEventHandler 记录事件指标（用于后续集成Prometheus）
-func MetricsEventHandler() EventHandlerFunc {
+func MetricsEventHandler(log Logger) EventHandlerFunc {
 	return func(event *Event) {
 		// TODO: 这里可以集成Prometheus指标
 		// switch event.Type {
@@ -232,9 +232,9 @@ func MetricsEventHandler() EventHandlerFunc {
 		//     taskFailed.WithLabelValues(event.TaskName).Inc()
 		// }
 
-		logger.Debug("📊 [Event] Metrics recorded",
-			zap.String("event_type", string(event.Type)),
-			zap.String("task_name", event.TaskName),
+		log.Debug("📊 [Event] Metrics recorded",
+			"event_type", string(event.Type),
+			"task_name", event.TaskName,
 		)
 	}
 }

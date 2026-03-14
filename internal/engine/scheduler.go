@@ -44,8 +44,8 @@ func NewScheduler(registry *TaskRegistry, opts ...Option) *Scheduler {
 	scheduler := &Scheduler{
 		cron:              cron.New(cron.WithSeconds()),
 		Stats:             NewStatManager(),
-		DependencyManager: NewDependencyManager(),
-		EventManager:      NewEventManager(),
+		EventManager:      NewEventManager(NewDefaultLogger()),
+		DependencyManager: NewDependencyManager(NewDefaultLogger()),
 		jobDefinition:     make(map[string]JobDefinition),
 		registry:          registry,
 	}
@@ -56,20 +56,20 @@ func NewScheduler(registry *TaskRegistry, opts ...Option) *Scheduler {
 	scheduler.TaskQueue = NewTaskQueue(scheduler.runTaskWithStats, defaultWorkerNum)
 
 	// 事件监听 (日志、指标、依赖控制)
-	scheduler.EventManager.OnFunc(EventTypeBeforeJob, LoggingEventHandler())
-	scheduler.EventManager.OnFunc(EventTypeAfterJob, LoggingEventHandler())
-	scheduler.EventManager.OnFunc(EventTypeJobError, LoggingEventHandler())
-	scheduler.EventManager.OnFunc(EventTypeJobPanic, LoggingEventHandler())
+	scheduler.EventManager.OnFunc(EventTypeBeforeJob, LoggingEventHandler(scheduler.logger))
+	scheduler.EventManager.OnFunc(EventTypeAfterJob, LoggingEventHandler(scheduler.logger))
+	scheduler.EventManager.OnFunc(EventTypeJobError, LoggingEventHandler(scheduler.logger))
+	scheduler.EventManager.OnFunc(EventTypeJobPanic, LoggingEventHandler(scheduler.logger))
 
-	scheduler.EventManager.OnFunc(EventTypeAfterJob, MetricsEventHandler())
-	scheduler.EventManager.OnFunc(EventTypeJobError, MetricsEventHandler())
+	scheduler.EventManager.OnFunc(EventTypeAfterJob, MetricsEventHandler(scheduler.logger))
+	scheduler.EventManager.OnFunc(EventTypeJobError, MetricsEventHandler(scheduler.logger))
 
 	scheduler.EventManager.OnFunc(EventTypeAfterJob, DependencyEventHandler(scheduler.DependencyManager, scheduler.EventManager))
 	scheduler.EventManager.OnFunc(EventTypeJobError, DependencyEventHandler(scheduler.DependencyManager, scheduler.EventManager))
 	scheduler.EventManager.OnFunc(EventTypeDependencyMet, DependencyMetEventHandler(scheduler))
 
-	scheduler.EventManager.OnFunc(EventTypeJobSkipped, LoggingEventHandler())
-	scheduler.EventManager.OnFunc(EventTypeJobRetry, LoggingEventHandler())
+	scheduler.EventManager.OnFunc(EventTypeJobSkipped, LoggingEventHandler(scheduler.logger))
+	scheduler.EventManager.OnFunc(EventTypeJobRetry, LoggingEventHandler(scheduler.logger))
 
 	// 应用外部传入的 Option (可以覆盖上面的默认值)
 	for _, opt := range opts {

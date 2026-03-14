@@ -5,10 +5,6 @@ import (
 	"fmt"
 	"sync"
 	"time"
-
-	"github.com/iceymoss/go-task/pkg/logger"
-
-	"go.uber.org/zap"
 )
 
 var (
@@ -39,6 +35,7 @@ type DependencyManager struct {
 	dependencies map[string]*DependencyRule // 任务名 -> 依赖规则
 	taskStatus   map[string]TaskStatus      // 任务名 -> 任务状态
 	graph        map[string][]string        // 任务依赖图（用于检测循环依赖）
+	logger       Logger
 	mu           sync.RWMutex
 }
 
@@ -51,11 +48,12 @@ type TaskStatus struct {
 }
 
 // NewDependencyManager 创建依赖管理器
-func NewDependencyManager() *DependencyManager {
+func NewDependencyManager(logger Logger) *DependencyManager {
 	return &DependencyManager{
 		dependencies: make(map[string]*DependencyRule),
 		taskStatus:   make(map[string]TaskStatus),
 		graph:        make(map[string][]string),
+		logger:       logger,
 	}
 }
 
@@ -81,10 +79,10 @@ func (dm *DependencyManager) AddDependency(rule *DependencyRule) error {
 		Success:   false,
 	}
 
-	logger.Info("✅ [Dependency] Added dependency",
-		zap.String("task", rule.TaskName),
-		zap.Strings("depends_on", rule.DependsOn),
-		zap.String("type", dm.dependencyTypeToString(rule.DependencyType)),
+	dm.logger.Info("✅ [Dependency] Added dependency",
+		"task", rule.TaskName,
+		"depends_on", rule.DependsOn,
+		"type", dm.dependencyTypeToString(rule.DependencyType),
 	)
 
 	return nil
@@ -201,10 +199,10 @@ func (dm *DependencyManager) UpdateTaskStatus(taskName string, success bool, err
 		Error:      err,
 	}
 
-	logger.Info("📊 [Dependency] Updated task status",
-		zap.String("task", taskName),
-		zap.Bool("success", success),
-		zap.Time("finished_at", time.Now()),
+	dm.logger.Info("📊 [Dependency] Updated task status",
+		"task", taskName,
+		"success", success,
+		"finished_at", time.Now(),
 	)
 }
 

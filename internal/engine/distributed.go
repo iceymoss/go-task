@@ -9,10 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/iceymoss/go-task/pkg/logger"
-
 	"github.com/go-redis/redis/v8"
-	"go.uber.org/zap"
 )
 
 const DefaultLeaderKeyTTL = 15
@@ -34,12 +31,14 @@ type RedisLeaderElector struct {
 	ttl           time.Duration
 	renewInterval time.Duration
 
+	logger Logger
+
 	isLeader int32
 	mu       sync.RWMutex
 	started  bool
 }
 
-func NewRedisLeaderElector(client *redis.Client, key string, ttl, renewInterval time.Duration) *RedisLeaderElector {
+func NewRedisLeaderElector(client *redis.Client, key string, ttl, renewInterval time.Duration, logger Logger) *RedisLeaderElector {
 	if ttl <= 0 {
 		ttl = DefaultLeaderKeyTTL * time.Second
 	}
@@ -53,6 +52,7 @@ func NewRedisLeaderElector(client *redis.Client, key string, ttl, renewInterval 
 		id:            defaultInstanceID(),
 		ttl:           ttl,
 		renewInterval: renewInterval,
+		logger:        logger,
 	}
 }
 
@@ -100,7 +100,7 @@ func (r *RedisLeaderElector) loop(ctx context.Context, onStarted func(), onStopp
 		case <-ticker.C:
 			if r.IsLeader() {
 				if err := r.renewLock(ctx); err != nil {
-					logger.Info("⚠️ [LeaderElector] renew lock failed", zap.Error(err))
+					r.logger.Info("⚠️ [LeaderElector] renew lock failed", err)
 					r.setLeader(false)
 					if onStopped != nil {
 						onStopped() // 失去锁，触发停止回调
@@ -113,7 +113,7 @@ func (r *RedisLeaderElector) loop(ctx context.Context, onStarted func(), onStopp
 				}
 				if ok {
 					r.setLeader(true)
-					logger.Info("👑 [LeaderElector] became leader", zap.String("id", r.id))
+					r.logger.Info("👑 [LeaderElector] became leader", "id", r.id)
 					if onStarted != nil {
 						onStarted() // 抢到锁，触发启动回调
 					}
