@@ -42,7 +42,6 @@ func NewServer(cfg *conf.Config, staticFS *embed.FS) *Server {
 
 	// 启用基于 Redis 的分布式选主（多实例部署时，只有 Leader 会真正执行定时任务）
 	// key 可以根据业务环境自定义
-	scheduler.EnableRedisLeaderElection("go-task:scheduler:leader", 15*time.Second, 5*time.Second)
 
 	// 加载所有任务
 	tasks.LoadAllTasks(registry, scheduler, cfg)

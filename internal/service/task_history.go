@@ -1,9 +1,10 @@
-package engine
+package service
 
 import (
 	"context"
 	"time"
 
+	"github.com/iceymoss/go-task/internal/engine"
 	"github.com/iceymoss/go-task/pkg/db"
 	"github.com/iceymoss/go-task/pkg/db/objects"
 	"github.com/iceymoss/go-task/pkg/logger"
@@ -26,16 +27,16 @@ func NewGormHistoryStorage() *GormHistoryStorage {
 }
 
 // SaveEvent 根据事件持久化任务历史
-func (g *GormHistoryStorage) SaveEvent(event *Event) error {
+func (g *GormHistoryStorage) SaveEvent(event *engine.Event) error {
 	// 只处理完成或失败的事件
-	if event.Type != EventTypeAfterJob && event.Type != EventTypeJobError {
+	if event.Type != engine.EventTypeAfterJob && event.Type != engine.EventTypeJobError {
 		return nil
 	}
 
 	conn := db.GetMysqlConn(db.MYSQL_DB_GO_TASK)
 
 	status := 1 // Success
-	if event.Type == EventTypeJobError {
+	if event.Type == engine.EventTypeJobError {
 		status = 2
 	}
 

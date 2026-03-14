@@ -190,6 +190,7 @@ func (h *JobHandler) CreateJob(c *gin.Context) {
 		if err := h.scheduler.AddJob(
 			job.CronExpr,
 			job.Name,
+			job.Name,
 			req.Params,
 			job.Source,
 		); err != nil {
@@ -524,7 +525,7 @@ func (h *JobHandler) jobToResponse(job *models.Job) JobResponse {
 
 	// 获取任务状态
 	status := "unknown"
-	if stat := h.scheduler.Stats.Get(job.Name); stat != nil {
+	if stat, ok := h.scheduler.Stats.Get(job.Name); ok {
 		status = string(stat.Status)
 	}
 
@@ -561,6 +562,7 @@ func (h *JobHandler) reloadJobToScheduler(job *models.Job) error {
 	if job.Enable {
 		return h.scheduler.AddJob(
 			job.CronExpr,
+			job.Name,
 			job.Name,
 			params,
 			job.Source,

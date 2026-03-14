@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/iceymoss/go-task/pkg/db"
 	"github.com/iceymoss/go-task/pkg/logger"
 
 	"github.com/go-redis/redis/v8"
@@ -20,42 +19,27 @@ const DefaultLeaderKeyTTL = 15
 
 // LeaderElector 抽象的选主接口
 type LeaderElector interface {
-	// Start 启动选主循环（非阻塞或长时间阻塞均可，由实现决定）
-	Start(ctx context.Context) error
-
-	// Stop 停止选主循环
+	// Start 启动选主。在这里接收 Scheduler 传来的回调函数
+	Start(ctx context.Context, onStartedLeading func(), onStoppedLeading func()) error
 	Stop(ctx context.Context) error
-
-	// IsLeader 当前实例是否为 Leader
 	IsLeader() bool
 }
 
 // RedisLeaderElector 基于 Redis 的简单选主实现
 // 使用一个带 TTL 的 key 做 Leader 锁，value 为实例 ID。
 type RedisLeaderElector struct {
-	client        *redis.Client // Redis 客户端
-	key           string        // Redis 锁的 key
-	id            string        // 实例 ID
-	ttl           time.Duration // 锁的 TTL
-	renewInterval time.Duration // 锁续约的间隔
+	client        *redis.Client
+	key           string
+	id            string
+	ttl           time.Duration
+	renewInterval time.Duration
 
-	onStartedLeading func() // 选主成功时调用
-	onStoppedLeading func() // 停止选主时调用
-
-	isLeader int32 // 是否为 Leader
-
-	mu      sync.RWMutex // 锁
-	started bool         // 是否已启动
+	isLeader int32
+	mu       sync.RWMutex
+	started  bool
 }
 
-// NewRedisLeaderElector 创建 Redis 选主器
-func NewRedisLeaderElector(
-	client *redis.Client,
-	key string,
-	ttl, renewInterval time.Duration,
-	onStartedLeading func(),
-	onStoppedLeading func(),
-) *RedisLeaderElector {
+func NewRedisLeaderElector(client *redis.Client, key string, ttl, renewInterval time.Duration) *RedisLeaderElector {
 	if ttl <= 0 {
 		ttl = DefaultLeaderKeyTTL * time.Second
 	}
@@ -63,17 +47,12 @@ func NewRedisLeaderElector(
 		renewInterval = ttl / 2
 	}
 
-	// 生成实例id
-	id := defaultInstanceID()
-
 	return &RedisLeaderElector{
-		client:           client,
-		key:              key,
-		id:               id,
-		ttl:              ttl,
-		renewInterval:    renewInterval,
-		onStartedLeading: onStartedLeading,
-		onStoppedLeading: onStoppedLeading,
+		client:        client,
+		key:           key,
+		id:            defaultInstanceID(),
+		ttl:           ttl,
+		renewInterval: renewInterval,
 	}
 }
 
@@ -87,7 +66,7 @@ func defaultInstanceID() string {
 }
 
 // Start 启动选主循环（非阻塞）
-func (r *RedisLeaderElector) Start(ctx context.Context) error {
+func (r *RedisLeaderElector) Start(ctx context.Context, onStarted func(), onStopped func()) error {
 	r.mu.Lock()
 	if r.started {
 		r.mu.Unlock()
@@ -96,52 +75,47 @@ func (r *RedisLeaderElector) Start(ctx context.Context) error {
 	r.started = true
 	r.mu.Unlock()
 
-	go r.loop(ctx)
+	// 启动后台协程，把回调函数带进去
+	go r.loop(ctx, onStarted, onStopped)
 	return nil
 }
 
 // loop 主循环：尝试抢占锁、续约、检测是否失去 Leader
-func (r *RedisLeaderElector) loop(ctx context.Context) {
+func (r *RedisLeaderElector) loop(ctx context.Context, onStarted func(), onStopped func()) {
 	// 续约间隔
 	ticker := time.NewTicker(r.renewInterval)
-
-	// 停止时停止续约
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			// 退出前如果是 Leader，尝试释放锁
 			if r.IsLeader() {
-				if err := r.releaseLock(context.Background()); err != nil {
-					logger.Info("⚠️ [LeaderElector] release lock failed", zap.Error(err))
-				}
+				_ = r.releaseLock(context.Background())
 				r.setLeader(false)
+				if onStopped != nil {
+					onStopped() // 触发停止回调
+				}
 			}
 			return
 		case <-ticker.C:
 			if r.IsLeader() {
-				// 已是 Leader，尝试续约
 				if err := r.renewLock(ctx); err != nil {
 					logger.Info("⚠️ [LeaderElector] renew lock failed", zap.Error(err))
-					// 续约失败时，下一轮会尝试重新抢占
 					r.setLeader(false)
-					if r.onStoppedLeading != nil {
-						r.onStoppedLeading()
+					if onStopped != nil {
+						onStopped() // 失去锁，触发停止回调
 					}
 				}
 			} else {
-				// 非 Leader，尝试抢占
 				ok, err := r.acquireLock(ctx)
 				if err != nil {
-					logger.Info("⚠️ [LeaderElector] acquire lock failed", zap.Error(err))
 					continue
 				}
 				if ok {
 					r.setLeader(true)
-					logger.Info("👑 [LeaderElector] became leader", zap.Any("id", r.id))
-					if r.onStartedLeading != nil {
-						r.onStartedLeading()
+					logger.Info("👑 [LeaderElector] became leader", zap.String("id", r.id))
+					if onStarted != nil {
+						onStarted() // 抢到锁，触发启动回调
 					}
 				}
 			}
@@ -151,19 +125,12 @@ func (r *RedisLeaderElector) loop(ctx context.Context) {
 
 // acquireLock 使用 SETNX + TTL 抢占锁
 func (r *RedisLeaderElector) acquireLock(ctx context.Context) (bool, error) {
-	if r.client == nil {
-		r.client = db.GetRedisConn()
-	}
 	ok, err := r.client.SetNX(ctx, r.key, r.id, r.ttl).Result()
 	return ok, err
 }
 
 // renewLock 续约锁（仅在自己仍然是锁持有者时）
 func (r *RedisLeaderElector) renewLock(ctx context.Context) error {
-	if r.client == nil {
-		r.client = db.GetRedisConn()
-	}
-
 	val, err := r.client.Get(ctx, r.key).Result()
 	if errors.Is(err, redis.Nil) {
 		// key 不存在，锁已丢失
@@ -184,10 +151,6 @@ func (r *RedisLeaderElector) renewLock(ctx context.Context) error {
 
 // releaseLock 释放锁（仅在自己仍是持有者时）
 func (r *RedisLeaderElector) releaseLock(ctx context.Context) error {
-	if r.client == nil {
-		r.client = db.GetRedisConn()
-	}
-
 	val, err := r.client.Get(ctx, r.key).Result()
 	if errors.Is(err, redis.Nil) {
 		return nil
@@ -219,21 +182,4 @@ func (r *RedisLeaderElector) setLeader(v bool) {
 	} else {
 		atomic.StoreInt32(&r.isLeader, 0)
 	}
-}
-
-// EnableRedisLeaderElection 为调度器启用基于 Redis 的分布式选主
-// key 示例: "go-task:scheduler:leader"
-func (s *Scheduler) EnableRedisLeaderElection(key string, ttl, renewInterval time.Duration) {
-	client := db.GetRedisConn()
-
-	onStarted := func() {
-		logger.Info("👑 [Scheduler] This instance became leader, starting cron")
-		s.cron.Start()
-	}
-	onStopped := func() {
-		logger.Info("👋 [Scheduler] Lost leadership, stopping cron")
-		s.cron.Stop()
-	}
-
-	s.leaderElector = NewRedisLeaderElector(client, key, ttl, renewInterval, onStarted, onStopped)
 }

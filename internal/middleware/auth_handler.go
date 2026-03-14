@@ -4,10 +4,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/iceymoss/go-task/internal/conf"
 	"github.com/iceymoss/go-task/pkg/auth"
 	"github.com/iceymoss/go-task/pkg/db/models"
+
+	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 

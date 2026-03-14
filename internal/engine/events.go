@@ -12,25 +12,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// ==================== 全局事件实例 ====================
-
-var (
-	globalEventManager *EventManager
-	eventManagerOnce   sync.Once
-)
-
-// SetGlobalEventManager 设置全局事件管理器
-func SetGlobalEventManager(em *EventManager) {
-	eventManagerOnce.Do(func() {
-		globalEventManager = em
-	})
-}
-
-// GetGlobalEventManager 获取全局事件管理器
-func GetGlobalEventManager() *EventManager {
-	return globalEventManager
-}
-
 // EventType 事件类型
 type EventType string
 
@@ -48,6 +29,27 @@ const (
 	EventBufferSize = 2000
 	eventWorkerNum  = 10
 )
+
+// EventOption 定义事件管理器的配置项
+type EventOption func(*EventManager)
+
+// WithEventWorkerNum 配置事件消费者的并发数
+func WithEventWorkerNum(num int) EventOption {
+	return func(em *EventManager) {
+		if num > 0 {
+			em.workerNum = num
+		}
+	}
+}
+
+// WithEventBufferSize 配置事件队列的缓冲大小 (名字留给它用)
+func WithEventBufferSize(size int) EventOption {
+	return func(em *EventManager) {
+		if size > 0 {
+			em.bufferSize = size
+		}
+	}
+}
 
 // Event 任务事件
 type Event struct {
@@ -79,24 +81,27 @@ type EventManager struct {
 	eventChan chan *Event    // 缓冲通道
 	wg        sync.WaitGroup // 用于优雅停机
 	closed    int32          // 是否已关闭
+
+	workerNum  int
+	bufferSize int
 }
 
-// NewEventManager 创建事件管理器 (增加容量和 worker 数量参数)
-func NewEventManager(workerNum int, bufferSize int) *EventManager {
-	if workerNum <= 0 {
-		workerNum = 3
-	}
-	if bufferSize <= 0 {
-		bufferSize = 2000
-	}
-
+// NewEventManager 创建事件管理器
+func NewEventManager(opts ...EventOption) *EventManager {
 	em := &EventManager{
-		handlers:  make(map[EventType][]EventHandler),
-		eventChan: make(chan *Event, bufferSize),
+		handlers:   make(map[EventType][]EventHandler),
+		workerNum:  eventWorkerNum,
+		bufferSize: EventBufferSize,
 	}
 
-	// 启动固定数量的后台消费协程
-	for i := 0; i < workerNum; i++ {
+	// 应用用户传入的配置选项进行覆盖
+	for _, opt := range opts {
+		opt(em)
+	}
+
+	// 必须在配置确定之后，再分配内存和启动协程！
+	em.eventChan = make(chan *Event, em.bufferSize)
+	for i := 0; i < em.workerNum; i++ {
 		em.wg.Add(1)
 		go em.workerLoop()
 	}
@@ -338,10 +343,14 @@ func NewWebhookEventHandler(config WebhookConfig) EventHandlerFunc {
 func DependencyMetEventHandler(scheduler *Scheduler) EventHandlerFunc {
 	return func(event *Event) {
 		depTaskName := event.TaskName
-		stat := scheduler.Stats.Get(depTaskName)
+		stat, ok := scheduler.Stats.Get(depTaskName)
+		if !ok {
+			log.Printf("🔔 [EventPush] Upstream task %s not found in stats!", depTaskName)
+			return
+		}
 
 		// 如果下游任务正处于等待上游的状态 (Waiting)，或者是纯事件触发的无时间任务 (Idle)
-		if stat != nil && (stat.Status == Waiting || stat.Status == Idle) {
+		if stat.Status == Waiting || stat.Status == Idle {
 			log.Printf("🔔 [EventPush] Upstream finished! Pushing downstream task to queue: %s", depTaskName)
 			// 直接推给 Dispatcher 唤醒执行
 			scheduler.Dispatch(depTaskName)
@@ -350,7 +359,7 @@ func DependencyMetEventHandler(scheduler *Scheduler) EventHandlerFunc {
 }
 
 // DependencyEventHandler 依赖事件处理器
-func DependencyEventHandler(dependencyManager *DependencyManager) EventHandlerFunc {
+func DependencyEventHandler(dependencyManager *DependencyManager, em *EventManager) EventHandlerFunc {
 	return func(event *Event) {
 		if event.Type == EventTypeAfterJob || event.Type == EventTypeJobError {
 			// 更新依赖状态
@@ -373,8 +382,7 @@ func DependencyEventHandler(dependencyManager *DependencyManager) EventHandlerFu
 						},
 					}
 
-					// 通过全局 EventManager 发射事件
-					if em := GetGlobalEventManager(); em != nil {
+					if em != nil {
 						em.Emit(dependencyEvent)
 					}
 

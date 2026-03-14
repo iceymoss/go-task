@@ -36,6 +36,7 @@ func LoadAllTasks(registry *engine.TaskRegistry, scheduler *engine.Scheduler, cf
 			err := scheduler.AddJob(
 				task.GetDefaultCron(),
 				name,
+				name,
 				task.GetDefaultParams(),
 				string(task.GetTaskType()),
 			)
@@ -62,7 +63,7 @@ func LoadAllTasks(registry *engine.TaskRegistry, scheduler *engine.Scheduler, cf
 			}
 		}
 
-		err := scheduler.AddJob(cronExpr, job.Name, job.Params, string(constants.TaskTypeYAML))
+		err := scheduler.AddJob(cronExpr, job.Name, job.Name, job.Params, string(constants.TaskTypeYAML))
 		if err != nil {
 			logger.Logger.Error("add config job failed", zap.String("task_name", job.Name), zap.Error(err))
 		}

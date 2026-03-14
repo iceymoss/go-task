@@ -13,17 +13,17 @@ const defaultWorkerNum = 10
 
 // TaskQueue 简单优先级任务队列，使用内存优先队列 + 固定工作协程
 type TaskQueue struct {
-	scheduler *Scheduler     // 引用调度器以执行任务
-	mu        sync.Mutex     // 保护 items 和 closed 的并发访问
-	cond      *sync.Cond     // 条件变量，用于通知 worker 有新任务
-	items     *priorityQueue // 任务列表
-	workerNum int            // worker 数量
-	wg        sync.WaitGroup // 等待 worker 退出
-	closed    bool           // 是否已关闭队列
+	handler   func(name string) // 任务处理函数
+	mu        sync.Mutex        // 保护 items 和 closed 的并发访问
+	cond      *sync.Cond        // 条件变量，用于通知 worker 有新任务
+	items     *priorityQueue    // 任务列表
+	workerNum int               // worker 数量
+	wg        sync.WaitGroup    // 等待 worker 退出
+	closed    bool              // 是否已关闭队列
 }
 
 // NewTaskQueue 创建任务队列, 会启动固定数量的 worker
-func NewTaskQueue(s *Scheduler, workerNum int) *TaskQueue {
+func NewTaskQueue(handler func(name string), workerNum int) *TaskQueue {
 	if workerNum <= 0 {
 		workerNum = defaultWorkerNum
 	}
@@ -34,7 +34,7 @@ func NewTaskQueue(s *Scheduler, workerNum int) *TaskQueue {
 
 	// 初始化任务队列
 	q := &TaskQueue{
-		scheduler: s,
+		handler:   handler,
 		workerNum: workerNum,
 		items:     &pq, // 指向堆
 	}
@@ -66,7 +66,9 @@ func (q *TaskQueue) workerLoop(id int) {
 			return
 		}
 		logger.Info(fmt.Sprintf("🧵 [TaskQueue] Worker-%d handling job: %s (priority=%d)", id, item.Name, item.Priority))
-		q.scheduler.runTaskWithStats(item.Name)
+		if q.handler != nil {
+			q.handler(item.Name)
+		}
 	}
 }
 

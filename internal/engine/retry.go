@@ -39,13 +39,15 @@ func DefaultRetryPolicy() *RetryPolicy {
 // RetryManager 重试管理器
 type RetryManager struct {
 	policies map[string]*RetryPolicy // 任务名 -> 重试策略
+	em       *EventManager
 	mu       sync.RWMutex
 }
 
 // NewRetryManager 创建重试管理器
-func NewRetryManager() *RetryManager {
+func NewRetryManager(em *EventManager) *RetryManager {
 	return &RetryManager{
 		policies: make(map[string]*RetryPolicy),
+		em:       em,
 	}
 }
 
@@ -153,8 +155,8 @@ func (rm *RetryManager) ExecuteWithRetry(taskName string, ctx context.Context, e
 		)
 
 		// 发射重试事件
-		if eventManager := GetGlobalEventManager(); eventManager != nil {
-			eventManager.Emit(&Event{
+		if rm.em != nil {
+			rm.em.Emit(&Event{
 				Type:      EventTypeJobRetry,
 				TaskName:  taskName,
 				TimeStamp: time.Now(),
@@ -167,11 +169,13 @@ func (rm *RetryManager) ExecuteWithRetry(taskName string, ctx context.Context, e
 			})
 		}
 
-		// 等待
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			timer.Stop() // 如果 Context 提前取消，立即释放定时器内存
 			return ctx.Err()
-		case <-time.After(delay):
+		case <-timer.C:
+			// 正常等到了延迟时间，继续下一轮循环
 		}
 	}
 
