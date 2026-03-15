@@ -47,6 +47,18 @@ type TaskStatus struct {
 	Error      error     //  错误信息
 }
 
+// DependencyOption 定义依赖管理器的配置项
+type DependencyOption func(*DependencyManager)
+
+// WithDependencyLogger 配置依赖管理器的日志实现
+func WithDependencyLogger(logger Logger) DependencyOption {
+	return func(dm *DependencyManager) {
+		if logger != nil {
+			dm.logger = logger
+		}
+	}
+}
+
 // NewDependencyManager 创建依赖管理器
 func NewDependencyManager(logger Logger) *DependencyManager {
 	return &DependencyManager{

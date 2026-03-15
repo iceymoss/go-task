@@ -3,14 +3,9 @@ package engine
 import (
 	"context"
 	"fmt"
-	"log"
 	"runtime/debug"
 	"sync/atomic"
 	"time"
-
-	"github.com/iceymoss/go-task/pkg/logger"
-
-	"go.uber.org/zap"
 )
 
 // JobFunc 任务函数类型
@@ -40,16 +35,13 @@ func (c Chain) Apply(job JobFunc) JobFunc {
 // ==================== 内置包装器 ====================
 
 // Recover 恢复panic，记录日志
-func Recover(logger *zap.Logger) JobWrapper {
+func Recover(logger Logger) JobWrapper {
 	return func(next JobFunc) JobFunc {
 		return func(ctx context.Context) error {
 			defer func() {
 				if r := recover(); r != nil {
 					stack := debug.Stack()
-					logger.Error("❌ [JobWrapper] Panic recovered",
-						zap.Any("panic", r),
-						zap.String("stack", string(stack)),
-					)
+					logger.Error("❌ [JobWrapper] Panic recovered", "panic", r, "stack", string(stack))
 				}
 			}()
 			return next(ctx)
@@ -58,7 +50,7 @@ func Recover(logger *zap.Logger) JobWrapper {
 }
 
 // DelayIfStillRunning 如果任务正在运行，则延迟执行
-func DelayIfStillRunning(logger *zap.Logger) JobWrapper {
+func DelayIfStillRunning(logger Logger) JobWrapper {
 	var running int32
 	return func(next JobFunc) JobFunc {
 		return func(ctx context.Context) error {
@@ -73,7 +65,7 @@ func DelayIfStillRunning(logger *zap.Logger) JobWrapper {
 }
 
 // SkipIfStillRunning 如果任务正在运行，则跳过执行
-func SkipIfStillRunning(logger *zap.Logger) JobWrapper {
+func SkipIfStillRunning(logger Logger) JobWrapper {
 	var running int32
 	return func(next JobFunc) JobFunc {
 		return func(ctx context.Context) error {
@@ -127,29 +119,19 @@ func Timeout(timeout time.Duration) JobWrapper {
 }
 
 // Logging 记录任务执行日志
-func Logging(taskName string) JobWrapper {
+func Logging(taskName string, logger Logger) JobWrapper {
 	return func(next JobFunc) JobFunc {
 		return func(ctx context.Context) error {
 			startTime := time.Now()
-			logger.Info("🚀 [JobWrapper] Job started",
-				zap.String("task", taskName),
-				zap.Time("start_time", startTime),
-			)
+			logger.Info("🚀 [JobWrapper] Job started", "task", taskName, "start_time", startTime)
 
 			err := next(ctx)
 
 			duration := time.Since(startTime)
 			if err != nil {
-				logger.Error("❌ [JobWrapper] Job failed",
-					zap.String("task", taskName),
-					zap.Duration("duration", duration),
-					zap.Error(err),
-				)
+				logger.Error("❌ [JobWrapper] Job failed", "task", taskName, "duration", duration, err)
 			} else {
-				logger.Info("✅ [JobWrapper] Job completed successfully",
-					zap.String("task", taskName),
-					zap.Duration("duration", duration),
-				)
+				logger.Info("✅ [JobWrapper] Job completed successfully", "task", taskName, "duration", duration)
 			}
 
 			return err
@@ -158,7 +140,7 @@ func Logging(taskName string) JobWrapper {
 }
 
 // Metrics 记录任务执行指标（用于后续集成Prometheus）
-func Metrics(taskName string) JobWrapper {
+func Metrics(taskName string, logger Logger) JobWrapper {
 	return func(next JobFunc) JobFunc {
 		return func(ctx context.Context) error {
 			startTime := time.Now()
@@ -175,9 +157,9 @@ func Metrics(taskName string) JobWrapper {
 
 			// 暂时记录到日志
 			if err != nil {
-				log.Printf("📊 [Metrics] Task %s failed after %v: %v", taskName, duration, err)
+				logger.Errorf("❌ [Metrics] Task %s failed after %v: %v", taskName, duration, err)
 			} else {
-				log.Printf("📊 [Metrics] Task %s completed in %v", taskName, duration)
+				logger.Infof("📊 [Metrics] Task %s completed in %v", taskName, duration)
 			}
 
 			return err
@@ -263,7 +245,7 @@ func CircuitBreaker(breaker CircuitBreakerPolicy) JobWrapper {
 }
 
 // Conditional 条件执行包装器
-func Conditional(predicate func() bool) JobWrapper {
+func Conditional(logger Logger, predicate func() bool) JobWrapper {
 	return func(next JobFunc) JobFunc {
 		return func(ctx context.Context) error {
 			if !predicate() {

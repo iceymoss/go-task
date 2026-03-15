@@ -7,10 +7,8 @@ import (
 	"time"
 
 	"github.com/iceymoss/go-task/internal/core"
-	"github.com/iceymoss/go-task/pkg/logger"
 
 	"github.com/robfig/cron/v3"
-	"go.uber.org/zap"
 )
 
 const (
@@ -50,10 +48,17 @@ func NewScheduler(registry *TaskRegistry, opts ...Option) *Scheduler {
 		registry:          registry,
 	}
 
-	scheduler.RetryManager = NewRetryManager(scheduler.EventManager)
+	// 应用外部传入的 Option (可以覆盖上面的默认值)
+	for _, opt := range opts {
+		opt(scheduler)
+	}
+
+	scheduler.RetryManager = NewRetryManager(scheduler.EventManager, scheduler.logger)
 
 	// 初始化任务队列（默认 10 个 worker）
-	scheduler.TaskQueue = NewTaskQueue(scheduler.runTaskWithStats, defaultWorkerNum)
+	scheduler.TaskQueue = NewTaskQueue(scheduler.runTaskWithStats, defaultWorkerNum, scheduler.logger)
+
+	WithDependencyLogger(scheduler.logger)
 
 	// 事件监听 (日志、指标、依赖控制)
 	scheduler.EventManager.OnFunc(EventTypeBeforeJob, LoggingEventHandler(scheduler.logger))
@@ -66,15 +71,10 @@ func NewScheduler(registry *TaskRegistry, opts ...Option) *Scheduler {
 
 	scheduler.EventManager.OnFunc(EventTypeAfterJob, DependencyEventHandler(scheduler.DependencyManager, scheduler.EventManager))
 	scheduler.EventManager.OnFunc(EventTypeJobError, DependencyEventHandler(scheduler.DependencyManager, scheduler.EventManager))
-	scheduler.EventManager.OnFunc(EventTypeDependencyMet, DependencyMetEventHandler(scheduler))
+	scheduler.EventManager.OnFunc(EventTypeDependencyMet, DependencyMetEventHandler(scheduler, scheduler.logger))
 
 	scheduler.EventManager.OnFunc(EventTypeJobSkipped, LoggingEventHandler(scheduler.logger))
 	scheduler.EventManager.OnFunc(EventTypeJobRetry, LoggingEventHandler(scheduler.logger))
-
-	// 应用外部传入的 Option (可以覆盖上面的默认值)
-	for _, opt := range opts {
-		opt(scheduler)
-	}
 
 	return scheduler
 }
@@ -85,7 +85,7 @@ type Option func(*Scheduler)
 // WithWorkerNum 配置任务队列的并发 worker 数量
 func WithWorkerNum(num int) Option {
 	return func(s *Scheduler) {
-		s.TaskQueue = NewTaskQueue(s.runTaskWithStats, num)
+		s.TaskQueue = NewTaskQueue(s.runTaskWithStats, num, s.logger)
 	}
 }
 
@@ -106,8 +106,8 @@ func WithCronOptions(opts ...cron.Option) Option {
 // WithHistoryStorage 允许用户注入自定义的历史记录存储器
 func WithHistoryStorage(storage HistoryStorage) Option {
 	return func(s *Scheduler) {
-		s.EventManager.OnFunc(EventTypeAfterJob, NewHistoryEventHandler(storage))
-		s.EventManager.OnFunc(EventTypeJobError, NewHistoryEventHandler(storage))
+		s.EventManager.OnFunc(EventTypeAfterJob, NewHistoryEventHandler(storage, s.logger))
+		s.EventManager.OnFunc(EventTypeJobError, NewHistoryEventHandler(storage, s.logger))
 	}
 }
 
@@ -119,10 +119,10 @@ func WithLeaderElector(elector LeaderElector) Option {
 }
 
 // WithLogger 外部注入自定义的日志实现
-func WithLogger(l Logger) Option {
+func WithLogger(log Logger) Option {
 	return func(s *Scheduler) {
-		if l != nil {
-			s.logger = l
+		if log != nil {
+			s.logger = log
 		}
 	}
 }
@@ -132,8 +132,8 @@ func WithLogger(l Logger) Option {
 func (s *Scheduler) buildDefaultChain(taskName string) Chain {
 	return Chain{}.
 		Then(
-			Logging(taskName),
-			Metrics(taskName),
+			Logging(taskName, s.logger),
+			Metrics(taskName, s.logger),
 			RetryWithPolicy(s.RetryManager, taskName),
 			Timeout(defaultTaskTimeout),
 		)
@@ -203,7 +203,7 @@ func (s *Scheduler) runTaskWithStats(name string) {
 	reg, ok := s.jobDefinition[name]
 	s.mu.RUnlock()
 	if !ok {
-		logger.Info("⚠️ [Schedule] Job not jobDefinition", zap.Any("name", name))
+		s.logger.Info("⚠️ [Schedule] Job not jobDefinition", "name", name)
 		return
 	}
 
@@ -217,7 +217,7 @@ func (s *Scheduler) runTaskWithStats(name string) {
 
 	stat, ok := s.Stats.Get(name)
 	if !ok {
-		logger.Info("⚠️ [Schedule] Job not jobDefinition", zap.Any("name", name))
+		s.logger.Info("⚠️ [Schedule] Job not jobDefinition", "name", name)
 		return
 	}
 	ctx := context.Background()
@@ -234,7 +234,7 @@ func (s *Scheduler) runTaskWithStats(name string) {
 	stat.Status = Running
 	stat.RunCount++
 
-	logger.Info("🚀 [Schedule] Starting job", zap.Any("name", name))
+	s.logger.Info("🚀 [Schedule] Starting job", "name", name)
 
 	// 执行 (带超时控制)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -260,7 +260,7 @@ func (s *Scheduler) runTaskWithStats(name string) {
 		stat.LastResult = fmt.Sprintf(LastResultError, err)
 		stat.Status = Error
 		s.DependencyManager.UpdateTaskStatus(name, false, err)
-		logger.Info(fmt.Sprintf("❌ [Schedule] Job failed: %s, err: %v", name, err))
+		s.logger.Info(fmt.Sprintf("❌ [Schedule] Job failed: %s, err: %v", name, err))
 
 		s.EventManager.Emit(&Event{
 			Type:      EventTypeJobError,
@@ -277,7 +277,7 @@ func (s *Scheduler) runTaskWithStats(name string) {
 		stat.LastResult = LastResultSuccess
 		stat.Status = Idle
 		s.DependencyManager.UpdateTaskStatus(name, true, nil)
-		logger.Info("✅ [Schedule] Job finished: %s", zap.Any("name", name))
+		s.logger.Info("✅ [Schedule] Job finished: %s", "name", name)
 
 		s.EventManager.Emit(&Event{
 			Type:      EventTypeAfterJob,
@@ -345,7 +345,7 @@ func (s *Scheduler) Dispatch(name string) {
 
 	stat, ok := s.Stats.Get(name)
 	if !ok {
-		logger.Info("⚠️ [Schedule] Job not jobDefinition", zap.Any("name", name))
+		s.logger.Info("⚠️ [Schedule] Job not jobDefinition", "name", name)
 		return
 	}
 
@@ -354,14 +354,14 @@ func (s *Scheduler) Dispatch(name string) {
 	if err != nil {
 		stat.Status = Error
 		stat.LastResult = fmt.Sprintf(LastResultDependencyCheck, err)
-		logger.Info("❌ [Dispatcher] Job dependency check failed", zap.Any("name", name), zap.Error(err))
+		s.logger.Info("❌ [Dispatcher] Job dependency check failed", "name", name, err)
 		return
 	}
 
 	// 依赖未满足，仅仅标记为挂起等待,避免不占用 Worker 协程
 	if !satisfied {
 		stat.Status = Waiting
-		logger.Info("⏳ [Dispatcher] Job triggered but waiting for upstream dependencies...", zap.Any("name", name))
+		s.logger.Info("⏳ [Dispatcher] Job triggered but waiting for upstream dependencies...", "name", name)
 		return
 	}
 
@@ -369,7 +369,7 @@ func (s *Scheduler) Dispatch(name string) {
 	stat.Status = Queued
 	if s.TaskQueue != nil {
 		if err := s.TaskQueue.Enqueue(name, reg.priority); err != nil {
-			logger.Info("⚠️ [Dispatcher] Enqueue job failed", zap.Any("name", name), zap.Error(err))
+			s.logger.Info("⚠️ [Dispatcher] Enqueue job failed", "name", name, err)
 		}
 	} else {
 		go s.runTaskWithStats(name)
@@ -400,11 +400,11 @@ func (s *Scheduler) Start() {
 
 	// 定义抢到 Leader 和失去 Leader 时的动作
 	onStarted := func() {
-		logger.Info("👑 [Scheduler] This instance became leader, starting cron")
+		s.logger.Info("👑 [Scheduler] This instance became leader, starting cron")
 		s.cron.Start()
 	}
 	onStopped := func() {
-		logger.Info("👋 [Scheduler] Lost leadership, stopping cron")
+		s.logger.Info("👋 [Scheduler] Lost leadership, stopping cron")
 		s.cron.Stop()
 	}
 
@@ -416,7 +416,7 @@ func (s *Scheduler) Start() {
 	if err != nil {
 		// 绝对不能 fallback 到 s.cron.Start() 如果启动多实例，会导致重复执行
 		// 应该直接 Fatal，让程序起不来，引起运维注意，防止脑裂。
-		logger.Fatal("[Scheduler] Fatal error: Leader election failed to start", zap.Error(err))
+		s.logger.Fatal("[Scheduler] Fatal error: Leader election failed to start", err)
 	}
 }
 func (s *Scheduler) Stop() {

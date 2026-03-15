@@ -4,8 +4,6 @@ import (
 	"container/heap"
 	"fmt"
 	"sync"
-
-	"github.com/iceymoss/go-task/pkg/logger"
 )
 
 // DefaultWorkerNum 默认工作协程数量
@@ -20,10 +18,11 @@ type TaskQueue struct {
 	workerNum int               // worker 数量
 	wg        sync.WaitGroup    // 等待 worker 退出
 	closed    bool              // 是否已关闭队列
+	logger    Logger
 }
 
 // NewTaskQueue 创建任务队列, 会启动固定数量的 worker
-func NewTaskQueue(handler func(name string), workerNum int) *TaskQueue {
+func NewTaskQueue(handler func(name string), workerNum int, log Logger) *TaskQueue {
 	if workerNum <= 0 {
 		workerNum = defaultWorkerNum
 	}
@@ -37,6 +36,7 @@ func NewTaskQueue(handler func(name string), workerNum int) *TaskQueue {
 		handler:   handler,
 		workerNum: workerNum,
 		items:     &pq, // 指向堆
+		logger:    log,
 	}
 
 	// 初始化条件变量
@@ -46,6 +46,18 @@ func NewTaskQueue(handler func(name string), workerNum int) *TaskQueue {
 	q.startWorkers()
 
 	return q
+}
+
+// TaskQueueOption 任务队列的配置项
+type TaskQueueOption func(*TaskQueue)
+
+// WithTaskQueueLogger 配置任务队列的日志实现
+func WithTaskQueueLogger(logger Logger) TaskQueueOption {
+	return func(q *TaskQueue) {
+		if logger != nil {
+			q.logger = logger
+		}
+	}
 }
 
 // startWorkers 启动固定数量的 worker
@@ -65,7 +77,7 @@ func (q *TaskQueue) workerLoop(id int) {
 		if !ok {
 			return
 		}
-		logger.Info(fmt.Sprintf("🧵 [TaskQueue] Worker-%d handling job: %s (priority=%d)", id, item.Name, item.Priority))
+		q.logger.Info(fmt.Sprintf("🧵 [TaskQueue] Worker-%d handling job: %s (priority=%d)", id, item.Name, item.Priority))
 		if q.handler != nil {
 			q.handler(item.Name)
 		}

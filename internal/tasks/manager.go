@@ -15,7 +15,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// LoadAllTasks 统一装配：负责将任务注册到菜单，并交给调度器运行
+// LoadAllTasks 统一装配, 负责将任务注册到菜单，并交给调度器运行
 func LoadAllTasks(registry *engine.TaskRegistry, scheduler *engine.Scheduler, cfg *conf.Config) {
 	var allCreators []core.TaskCreator
 	allCreators = append(allCreators, ai.Creators()...)

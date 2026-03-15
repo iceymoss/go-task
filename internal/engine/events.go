@@ -2,14 +2,9 @@ package engine
 
 import (
 	"context"
-	"log"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/iceymoss/go-task/pkg/logger"
-
-	"go.uber.org/zap"
 )
 
 // EventType 事件类型
@@ -47,6 +42,14 @@ func WithEventBufferSize(size int) EventOption {
 	return func(em *EventManager) {
 		if size > 0 {
 			em.bufferSize = size
+		}
+	}
+}
+
+func WithEventLogger(logger Logger) EventOption {
+	return func(em *EventManager) {
+		if logger != nil {
+			em.logger = logger
 		}
 	}
 }
@@ -247,7 +250,7 @@ type AlertConfig struct {
 	MaxRetries int
 }
 
-func NewAlertEventHandler(config AlertConfig) EventHandlerFunc {
+func NewAlertEventHandler(config AlertConfig, log Logger) EventHandlerFunc {
 	return func(event *Event) {
 		if !config.Enabled {
 			return
@@ -280,11 +283,11 @@ func NewAlertEventHandler(config AlertConfig) EventHandlerFunc {
 		}
 
 		if shouldAlert {
-			logger.Warn("🚨 [Event] Alert triggered",
-				zap.String("task_name", event.TaskName),
-				zap.String("reason", reason),
-				zap.Time("timestamp", event.TimeStamp),
-				zap.Error(event.Error),
+			log.Warn("🚨 [Event] Alert triggered",
+				"task_name", event.TaskName,
+				"reason", reason,
+				"timestamp", event.TimeStamp,
+				event.Error,
 			)
 
 			// TODO: 这里可以集成实际的告警系统
@@ -301,13 +304,13 @@ type HistoryStorage interface {
 	SaveEvent(event *Event) error
 }
 
-func NewHistoryEventHandler(storage HistoryStorage) EventHandlerFunc {
+func NewHistoryEventHandler(storage HistoryStorage, log Logger) EventHandlerFunc {
 	return func(event *Event) {
 		if err := storage.SaveEvent(event); err != nil {
-			logger.Error("❌ [Event] Failed to save event to history",
-				zap.Error(err),
-				zap.String("event_type", string(event.Type)),
-				zap.String("task_name", event.TaskName),
+			log.Error("❌ [Event] Failed to save event to history",
+				err,
+				"event_type", string(event.Type),
+				"task_name", event.TaskName,
 			)
 		}
 	}
@@ -320,7 +323,7 @@ type WebhookConfig struct {
 	Secret  string
 }
 
-func NewWebhookEventHandler(config WebhookConfig) EventHandlerFunc {
+func NewWebhookEventHandler(config WebhookConfig, log Logger) EventHandlerFunc {
 	return func(event *Event) {
 		if !config.Enabled || len(config.URLs) == 0 {
 			return
@@ -332,26 +335,26 @@ func NewWebhookEventHandler(config WebhookConfig) EventHandlerFunc {
 		// - 发送HTTP POST请求到所有URL
 		// - 处理重试
 
-		logger.Debug("🌐 [Event] Webhook would be sent",
-			zap.String("event_type", string(event.Type)),
-			zap.String("task_name", event.TaskName),
-			zap.Int("url_count", len(config.URLs)),
+		log.Debug("🌐 [Event] Webhook would be sent",
+			"event_type", string(event.Type),
+			"task_name", event.TaskName,
+			"url_count", len(config.URLs),
 		)
 	}
 }
 
-func DependencyMetEventHandler(scheduler *Scheduler) EventHandlerFunc {
+func DependencyMetEventHandler(scheduler *Scheduler, log Logger) EventHandlerFunc {
 	return func(event *Event) {
 		depTaskName := event.TaskName
 		stat, ok := scheduler.Stats.Get(depTaskName)
 		if !ok {
-			log.Printf("🔔 [EventPush] Upstream task %s not found in stats!", depTaskName)
+			log.Errorf("🔔 [EventPush] Upstream task %s not found in stats!", depTaskName)
 			return
 		}
 
 		// 如果下游任务正处于等待上游的状态 (Waiting)，或者是纯事件触发的无时间任务 (Idle)
 		if stat.Status == Waiting || stat.Status == Idle {
-			log.Printf("🔔 [EventPush] Upstream finished! Pushing downstream task to queue: %s", depTaskName)
+			log.Debugf("🔔 [EventPush] Upstream task %s finished! Pushing downstream task to queue: %s", depTaskName, depTaskName)
 			// 直接推给 Dispatcher 唤醒执行
 			scheduler.Dispatch(depTaskName)
 		}
@@ -386,9 +389,9 @@ func DependencyEventHandler(dependencyManager *DependencyManager, em *EventManag
 						em.Emit(dependencyEvent)
 					}
 
-					logger.Info("✅ [Event] Dependency satisfied",
-						zap.String("task", dep),
-						zap.String("dependency", event.TaskName),
+					em.logger.Info("✅ [Event] Dependency satisfied",
+						"task", dep,
+						"dependency", event.TaskName,
 					)
 				}
 			}
