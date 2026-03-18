@@ -9,5 +9,6 @@ func Creators() []core.TaskCreator {
 	return []core.TaskCreator{
 		NewWriterTask,
 		NewTechSummarizerTask,
+		NewAutoPushSummarizerTask,
 	}
 }
