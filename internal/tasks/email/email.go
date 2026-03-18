@@ -25,7 +25,7 @@ func NewEmailTask() core.Task {
 	return &EmailTask{
 		BaseTask: base_task.BaseTask{
 			Name:     TaskName,
-			TaskType: constants.TaskTypeSYSTEM,
+			TaskType: constants.TaskTypeAPI,
 		},
 	}
 }

@@ -9,16 +9,15 @@ import (
 
 // User 用户模型
 type User struct {
-	ID           uint      `gorm:"primaryKey" json:"id"`
-	Username     string    `gorm:"uniqueIndex;size:50;not null" json:"username"`
-	PasswordHash string    `gorm:"size:255;not null" json:"-"`
-	Email        string    `gorm:"size:100" json:"email"`
-	Role         string    `gorm:"size:20;default:'user'" json:"role"` // admin, user
-	IsActive     bool      `gorm:"default:true" json:"is_active"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           uint       `gorm:"primaryKey" json:"id"`
+	Username     string     `gorm:"uniqueIndex;size:50;not null" json:"username"`
+	PasswordHash string     `gorm:"size:255;not null" json:"-"`
+	Email        string     `gorm:"size:100" json:"email"`
+	Role         string     `gorm:"size:20;default:'user'" json:"role"` // admin, user
+	IsActive     bool       `gorm:"default:true" json:"is_active"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 	LastLoginAt  *time.Time `json:"last_login_at"`
-	Sessions     []Session `gorm:"foreignKey:UserID" json:"sessions,omitempty"`
 }
 
 // SetPassword 设置密码（自动加密）

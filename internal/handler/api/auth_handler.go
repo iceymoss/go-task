@@ -1,27 +1,28 @@
-package middleware
+package api
 
 import (
+	"log"
 	"net/http"
 	"time"
 
 	"github.com/iceymoss/go-task/internal/conf"
+	"github.com/iceymoss/go-task/internal/service"
 	"github.com/iceymoss/go-task/pkg/auth"
 	"github.com/iceymoss/go-task/pkg/db/models"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 // AuthHandler 认证处理器
 type AuthHandler struct {
-	AuthService *auth.AuthService
+	AuthService *service.AuthService
 	JwtService  *auth.JWTService
 }
 
 // NewAuthHandler 创建认证处理器
-func NewAuthHandler(db *gorm.DB, cfg *conf.Config) *AuthHandler {
+func NewAuthHandler(cfg *conf.Config) *AuthHandler {
 	jwtService := auth.NewJWTService(cfg.Auth.JWTSecret, time.Duration(cfg.Auth.TokenExpireHrs)*time.Hour)
-	authService := auth.NewAuthService(db, jwtService, time.Duration(cfg.Auth.TokenExpireHrs)*time.Hour)
+	authService := service.NewAuthService(jwtService, time.Duration(cfg.Auth.TokenExpireHrs)*time.Hour)
 
 	// 初始化默认管理员
 	if err := authService.InitDefaultUser(
@@ -29,8 +30,7 @@ func NewAuthHandler(db *gorm.DB, cfg *conf.Config) *AuthHandler {
 		cfg.Auth.DefaultAdmin.Password,
 		cfg.Auth.DefaultAdmin.Email,
 	); err != nil {
-		// 这里只记录日志，不影响服务启动
-		// log.Printf("⚠️ Failed to init default admin: %v", err)
+		log.Printf("⚠️ Failed to init default admin: %v", err)
 	}
 
 	return &AuthHandler{
@@ -59,7 +59,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	user, token, err := h.AuthService.Login(req.Username, req.Password)
+	user, token, err := h.AuthService.Login(c, req.Username, req.Password)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -87,7 +87,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		token = token[7:]
 	}
 
-	if err := h.AuthService.Logout(token); err != nil {
+	if err := h.AuthService.Logout(c, token); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -128,7 +128,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	newToken, err := h.AuthService.RefreshToken(req.Token)
+	newToken, err := h.AuthService.RefreshToken(c, req.Token)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return

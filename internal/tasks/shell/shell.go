@@ -25,7 +25,7 @@ func NewShellTask() core.Task {
 	return &ShellTask{
 		BaseTask: base_task.BaseTask{
 			Name:     ShellTaskName,
-			TaskType: constants.TaskTypeSYSTEM,
+			TaskType: constants.TaskTypeAPI,
 		},
 	}
 }

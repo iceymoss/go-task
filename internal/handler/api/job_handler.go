@@ -1,8 +1,10 @@
-package handler
+package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"gorm.io/gorm"
 	"net/http"
 	"strconv"
 	"time"
@@ -10,24 +12,21 @@ import (
 	"github.com/iceymoss/go-task/internal/engine"
 	"github.com/iceymoss/go-task/internal/tasks"
 	"github.com/iceymoss/go-task/pkg/constants"
+	"github.com/iceymoss/go-task/pkg/db"
 	"github.com/iceymoss/go-task/pkg/db/models"
-	"github.com/iceymoss/go-task/pkg/db/objects"
 
 	"github.com/gin-gonic/gin"
 	"github.com/robfig/cron/v3"
-	"gorm.io/gorm"
 )
 
 // JobHandler 任务管理处理器
 type JobHandler struct {
-	db        *gorm.DB
 	scheduler *engine.Scheduler
 }
 
 // NewJobHandler 创建任务处理器
-func NewJobHandler(db *gorm.DB, scheduler *engine.Scheduler) *JobHandler {
+func NewJobHandler(scheduler *engine.Scheduler) *JobHandler {
 	return &JobHandler{
-		db:        db,
 		scheduler: scheduler,
 	}
 }
@@ -87,8 +86,9 @@ type JobResponse struct {
 
 // GetJobs 获取任务列表
 func (h *JobHandler) GetJobs(c *gin.Context) {
+	dbCnn := db.GetMysqlConn(db.MYSQL_DB_GO_TASK)
 	var jobs []models.Job
-	query := h.db.Model(&models.Job{})
+	query := dbCnn.Model(&models.Job{})
 
 	// 支持筛选
 	if jobType := c.Query("type"); jobType != "" {
@@ -117,10 +117,12 @@ func (h *JobHandler) GetJobs(c *gin.Context) {
 
 // GetJob 获取任务详情
 func (h *JobHandler) GetJob(c *gin.Context) {
+	dbCnn := db.GetMysqlConn(db.MYSQL_DB_GO_TASK)
+
 	id := c.Param("id")
 	var job models.Job
-	if err := h.db.First(&job, id).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
+	if err := dbCnn.First(&job, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
 			return
 		}
@@ -151,9 +153,11 @@ func (h *JobHandler) CreateJob(c *gin.Context) {
 		return
 	}
 
+	dbCnn := db.GetMysqlConn(db.MYSQL_DB_GO_TASK)
+
 	// 检查任务名称是否已存在
 	var existingJob models.Job
-	if err := h.db.Where("name = ?", req.Name).First(&existingJob).Error; err == nil {
+	if err := dbCnn.Where("name = ?", req.Name).First(&existingJob).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "job name already exists"})
 		return
 	}
@@ -180,7 +184,7 @@ func (h *JobHandler) CreateJob(c *gin.Context) {
 		Source:       string(constants.TaskTypeWEB),
 	}
 
-	if err := h.db.Create(job).Error; err != nil {
+	if err := dbCnn.Create(job).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -204,10 +208,12 @@ func (h *JobHandler) CreateJob(c *gin.Context) {
 
 // UpdateJob 更新任务
 func (h *JobHandler) UpdateJob(c *gin.Context) {
+	dbCnn := db.GetMysqlConn(db.MYSQL_DB_GO_TASK)
+
 	id := c.Param("id")
 	var job models.Job
-	if err := h.db.First(&job, id).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
+	if err := dbCnn.First(&job, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
 			return
 		}
@@ -273,7 +279,7 @@ func (h *JobHandler) UpdateJob(c *gin.Context) {
 		job.Tags = string(tagsJSON)
 	}
 
-	if err := h.db.Save(&job).Error; err != nil {
+	if err := dbCnn.Save(&job).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -289,10 +295,12 @@ func (h *JobHandler) UpdateJob(c *gin.Context) {
 
 // DeleteJob 删除任务
 func (h *JobHandler) DeleteJob(c *gin.Context) {
+	dbCnn := db.GetMysqlConn(db.MYSQL_DB_GO_TASK)
+
 	id := c.Param("id")
 	var job models.Job
-	if err := h.db.First(&job, id).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
+	if err := dbCnn.First(&job, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
 			return
 		}
@@ -301,7 +309,7 @@ func (h *JobHandler) DeleteJob(c *gin.Context) {
 	}
 
 	// 软删除
-	if err := h.db.Delete(&job).Error; err != nil {
+	if err := dbCnn.Delete(&job).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -311,10 +319,12 @@ func (h *JobHandler) DeleteJob(c *gin.Context) {
 
 // EnableJob 启用任务
 func (h *JobHandler) EnableJob(c *gin.Context) {
+	dbCnn := db.GetMysqlConn(db.MYSQL_DB_GO_TASK)
+
 	id := c.Param("id")
 	var job models.Job
-	if err := h.db.First(&job, id).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
+	if err := dbCnn.First(&job, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
 			return
 		}
@@ -323,7 +333,7 @@ func (h *JobHandler) EnableJob(c *gin.Context) {
 	}
 
 	job.Enable = true
-	if err := h.db.Save(&job).Error; err != nil {
+	if err := dbCnn.Save(&job).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -339,10 +349,11 @@ func (h *JobHandler) EnableJob(c *gin.Context) {
 
 // DisableJob 禁用任务
 func (h *JobHandler) DisableJob(c *gin.Context) {
+	dbCnn := db.GetMysqlConn(db.MYSQL_DB_GO_TASK)
 	id := c.Param("id")
 	var job models.Job
-	if err := h.db.First(&job, id).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
+	if err := dbCnn.First(&job, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
 			return
 		}
@@ -351,7 +362,7 @@ func (h *JobHandler) DisableJob(c *gin.Context) {
 	}
 
 	job.Enable = false
-	if err := h.db.Save(&job).Error; err != nil {
+	if err := dbCnn.Save(&job).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -369,8 +380,10 @@ func (h *JobHandler) GetJobLogs(c *gin.Context) {
 		}
 	}
 
-	var logs []objects.SysJobLog
-	if err := h.db.Where("job_name = ?", id).Order("start_time DESC").Limit(limit).Find(&logs).Error; err != nil {
+	dbCnn := db.GetMysqlConn(db.MYSQL_DB_GO_TASK)
+
+	var logs []models.JobLog
+	if err := dbCnn.Where("job_name = ?", id).Order("start_time DESC").Limit(limit).Find(&logs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -458,7 +471,9 @@ func (h *JobHandler) CreateFromTemplate(c *gin.Context) {
 		Description: template.Description,
 	}
 
-	if err := h.db.Create(job).Error; err != nil {
+	dbCnn := db.GetMysqlConn(db.MYSQL_DB_GO_TASK)
+
+	if err := dbCnn.Create(job).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -468,8 +483,10 @@ func (h *JobHandler) CreateFromTemplate(c *gin.Context) {
 
 // GetDependencyGraph 获取依赖关系图
 func (h *JobHandler) GetDependencyGraph(c *gin.Context) {
+	dbCnn := db.GetMysqlConn(db.MYSQL_DB_GO_TASK)
+
 	var jobs []models.Job
-	if err := h.db.Where("enable = ?", true).Find(&jobs).Error; err != nil {
+	if err := dbCnn.Where("enable = ?", true).Find(&jobs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -592,11 +609,13 @@ func parseCronExpr(expr string) (cron.Schedule, error) {
 
 // SaveAsTemplate 将任务保存为自定义模板
 func (h *JobHandler) SaveAsTemplate(c *gin.Context) {
+	dbCnn := db.GetMysqlConn(db.MYSQL_DB_GO_TASK)
+
 	id := c.Param("id")
 
 	// 获取任务信息
 	var job models.Job
-	if err := h.db.First(&job, id).Error; err != nil {
+	if err := dbCnn.First(&job, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"code":    404,
 			"message": "任务不存在",
@@ -647,7 +666,7 @@ func (h *JobHandler) SaveAsTemplate(c *gin.Context) {
 	job.Description = req.Description
 
 	// 更新任务为模板
-	if err := h.db.Save(&job).Error; err != nil {
+	if err := dbCnn.Save(&job).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
 			"message": "保存模板失败",

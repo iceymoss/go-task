@@ -7,10 +7,8 @@ import (
 
 	"github.com/iceymoss/go-task/internal/conf"
 	"github.com/iceymoss/go-task/internal/engine"
-	"github.com/iceymoss/go-task/internal/handler"
-	"github.com/iceymoss/go-task/internal/middleware"
+	"github.com/iceymoss/go-task/internal/handler/api"
 	"github.com/iceymoss/go-task/pkg/auth"
-	"github.com/iceymoss/go-task/pkg/db"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,10 +17,10 @@ import (
 func RegisterRoute(cfg *conf.Config, scheduler *engine.Scheduler, staticFS fs.FS) *gin.Engine {
 	router := gin.Default()
 	// 创建认证处理器
-	authHandler := middleware.NewAuthHandler(db.GetMysqlConn(db.MYSQL_DB_GO_TASK), cfg)
+	authHandler := api.NewAuthHandler(cfg)
 
 	// 创建任务处理器
-	jobHandler := handler.NewJobHandler(db.GetMysqlConn(db.MYSQL_DB_GO_TASK), nil) // scheduler 稍后设置
+	jobHandler := api.NewJobHandler(scheduler) // scheduler 稍后设置
 
 	// 认证路由（无需token）
 	authGroup := router.Group("/api/auth")

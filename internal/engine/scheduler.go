@@ -277,7 +277,7 @@ func (s *Scheduler) runTaskWithStats(name string) {
 		stat.LastResult = LastResultSuccess
 		stat.Status = Idle
 		s.DependencyManager.UpdateTaskStatus(name, true, nil)
-		s.logger.Info("✅ [Schedule] Job finished: %s", "name", name)
+		s.logger.Info("✅ [Schedule] Job finished", "name", name)
 
 		s.EventManager.Emit(&Event{
 			Type:      EventTypeAfterJob,

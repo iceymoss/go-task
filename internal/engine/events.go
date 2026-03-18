@@ -58,6 +58,7 @@ func WithEventLogger(logger Logger) EventOption {
 type Event struct {
 	Type      EventType       // 事件类型
 	TaskName  string          // 任务名称
+	ExecID    string          // 执行id
 	TimeStamp time.Time       // 时间戳
 	Context   context.Context // 上下文
 	Error     error           // 错误信息

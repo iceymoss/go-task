@@ -33,7 +33,7 @@ func NewHttpTask() core.Task {
 		BaseTask: base_task.BaseTask{
 			Name:          HttpReqTaskName,
 			DefaultParams: map[string]any{},
-			TaskType:      constants.TaskTypeSYSTEM,
+			TaskType:      constants.TaskTypeAPI,
 		},
 	}
 }

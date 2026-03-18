@@ -1,34 +1,46 @@
-package auth
+package service
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"strconv"
 	"time"
 
+	"github.com/iceymoss/go-task/pkg/auth"
+	"github.com/iceymoss/go-task/pkg/db"
 	"github.com/iceymoss/go-task/pkg/db/models"
+
+	"github.com/go-redis/redis/v8"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
+)
+
+const (
+	SESSION_KEY = "user:session:"
+
+	TOKEN_EXPIRE = 24 * time.Hour
 )
 
 // AuthService 认证服务
 type AuthService struct {
-	db          *gorm.DB
-	jwtService  *JWTService
+	jwtService  *auth.JWTService
 	tokenExpire time.Duration
 }
 
 // NewAuthService 创建认证服务
-func NewAuthService(db *gorm.DB, jwtService *JWTService, tokenExpire time.Duration) *AuthService {
+func NewAuthService(jwtService *auth.JWTService, tokenExpire time.Duration) *AuthService {
 	return &AuthService{
-		db:          db,
 		jwtService:  jwtService,
 		tokenExpire: tokenExpire,
 	}
 }
 
 // Login 用户登录
-func (s *AuthService) Login(username, password string) (*models.User, string, error) {
-	// 查找用户
+func (s *AuthService) Login(ctx context.Context, username, password string) (*models.User, string, error) {
+	dbConn := db.GetMysqlConn(db.MYSQL_DB_GO_TASK)
 	var user models.User
-	result := s.db.Where("username = ?", username).First(&user)
+	result := dbConn.Where("username = ?", username).First(&user)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, "", errors.New("invalid username or password")
@@ -54,37 +66,69 @@ func (s *AuthService) Login(username, password string) (*models.User, string, er
 
 	// 创建会话记录
 	session := &models.Session{
+		ID:        uuid.New().String(),
 		UserID:    user.ID,
 		Token:     token,
 		ExpiresAt: time.Now().Add(s.tokenExpire),
 	}
-	if err := s.db.Create(session).Error; err != nil {
+
+	rdb := db.GetRedisConn()
+	key := SESSION_KEY + strconv.Itoa(int(user.ID))
+	if err = rdb.Set(ctx, key, session, TOKEN_EXPIRE).Err(); err != nil {
 		return nil, "", err
 	}
 
 	// 更新最后登录时间
 	now := time.Now()
 	user.LastLoginAt = &now
-	s.db.Save(&user)
+	dbConn.Model(&models.User{}).Save(&user)
 
 	return &user, token, nil
 }
 
 // Logout 用户登出
-func (s *AuthService) Logout(token string) error {
+func (s *AuthService) Logout(ctx context.Context, token string) error {
+	// 解析token
+	userInfo, err := s.jwtService.ValidateToken(token)
+	if err != nil {
+		return err
+	}
+
+	uid := userInfo.UserID
+
 	// 删除会话记录
-	return s.db.Where("token = ?", token).Delete(&models.Session{}).Error
+	rdb := db.GetRedisConn()
+	if err := rdb.Del(ctx, SESSION_KEY+strconv.Itoa(int(uid))).Err(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ValidateSession 验证会话
-func (s *AuthService) ValidateSession(token string) (*models.Session, error) {
-	var session models.Session
-	result := s.db.Where("token = ?", token).First(&session)
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+func (s *AuthService) ValidateSession(ctx context.Context, token string) (*models.Session, error) {
+	// 解析token
+	userInfo, err := s.jwtService.ValidateToken(token)
+	if err != nil {
+		return nil, err
+	}
+
+	uid := userInfo.UserID
+
+	rdb := db.GetRedisConn()
+	cachedSession := rdb.Get(ctx, SESSION_KEY+strconv.Itoa(int(uid)))
+	if cachedSession.Err() != nil {
+		if errors.Is(cachedSession.Err(), redis.Nil) {
 			return nil, errors.New("session not found")
 		}
-		return nil, result.Error
+		return nil, cachedSession.Err()
+	}
+
+	cachedSession.Val()
+
+	session := &models.Session{}
+	err = json.Unmarshal([]byte(cachedSession.Val()), session)
+	if err != nil {
+		return nil, err
 	}
 
 	// 检查是否过期
@@ -92,20 +136,14 @@ func (s *AuthService) ValidateSession(token string) (*models.Session, error) {
 		return nil, errors.New("session expired")
 	}
 
-	return &session, nil
+	return session, nil
 }
 
 // RefreshToken 刷新token
-func (s *AuthService) RefreshToken(oldToken string) (string, error) {
+func (s *AuthService) RefreshToken(ctx context.Context, oldToken string) (string, error) {
 	// 验证旧token
-	session, err := s.ValidateSession(oldToken)
+	session, err := s.ValidateSession(ctx, oldToken)
 	if err != nil {
-		return "", err
-	}
-
-	// 获取用户信息
-	var user models.User
-	if err := s.db.First(&user, session.UserID).Error; err != nil {
 		return "", err
 	}
 
@@ -117,24 +155,26 @@ func (s *AuthService) RefreshToken(oldToken string) (string, error) {
 
 	// 创建新会话
 	newSession := &models.Session{
-		UserID:    user.ID,
+		ID:        uuid.New().String(),
+		UserID:    session.UserID,
 		Token:     newToken,
 		ExpiresAt: time.Now().Add(s.tokenExpire),
 	}
-	if err := s.db.Create(newSession).Error; err != nil {
+
+	rdb := db.GetRedisConn()
+	key := SESSION_KEY + strconv.Itoa(int(newSession.UserID))
+	if err = rdb.Set(ctx, key, session, TOKEN_EXPIRE).Err(); err != nil {
 		return "", err
 	}
-
-	// 删除旧会话
-	s.db.Delete(session)
 
 	return newToken, nil
 }
 
 // GetCurrentUser 获取当前用户
 func (s *AuthService) GetCurrentUser(userID uint) (*models.User, error) {
+	dbConn := db.GetMysqlConn(db.MYSQL_DB_GO_TASK)
 	var user models.User
-	result := s.db.First(&user, userID)
+	result := dbConn.Model(&models.User{}).First(&user, userID)
 	if result.Error != nil {
 		return nil, result.Error
 	}
@@ -143,9 +183,10 @@ func (s *AuthService) GetCurrentUser(userID uint) (*models.User, error) {
 
 // InitDefaultUser 初始化默认管理员用户
 func (s *AuthService) InitDefaultUser(username, password, email string) error {
+	dbConn := db.GetMysqlConn(db.MYSQL_DB_GO_TASK)
 	// 检查是否已存在管理员
 	var count int64
-	s.db.Model(&models.User{}).Where("role = ?", "admin").Count(&count)
+	dbConn.Model(&models.User{}).Where("role = ?", "admin").Count(&count)
 	if count > 0 {
 		return nil // 已存在管理员，不创建
 	}
@@ -162,5 +203,5 @@ func (s *AuthService) InitDefaultUser(username, password, email string) error {
 		return err
 	}
 
-	return s.db.Create(admin).Error
+	return dbConn.Model(&models.User{}).Create(admin).Error
 }

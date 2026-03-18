@@ -42,7 +42,7 @@ func NewWriterTask() core.Task {
 	return &WriterTask{
 		BaseTask: base_task.BaseTask{
 			Name:     aiWriterTaskName,
-			TaskType: constants.TaskTypeSYSTEM,
+			TaskType: constants.TaskTypeYAML,
 		},
 	}
 }

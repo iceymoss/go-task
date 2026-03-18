@@ -6,13 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/iceymoss/go-task/pkg/constants"
 	"log"
 	"strings"
 	"time"
 
 	"github.com/iceymoss/go-task/internal/core"
 	"github.com/iceymoss/go-task/internal/tasks/base_task"
+	"github.com/iceymoss/go-task/pkg/constants"
 	"github.com/iceymoss/go-task/pkg/db"
 	"github.com/iceymoss/go-task/pkg/db/objects"
 
@@ -35,7 +35,7 @@ func NewTechSummarizerTask() core.Task {
 	return &TechSummarizerTask{
 		BaseTask: base_task.BaseTask{
 			Name:     aiTecSummarizerTaskName,
-			TaskType: constants.TaskTypeSYSTEM,
+			TaskType: constants.TaskTypeYAML,
 		},
 	}
 }

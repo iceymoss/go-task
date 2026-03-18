@@ -64,7 +64,12 @@ func NewServer(cfg *conf.Config, staticFS *embed.FS) *Server {
 	)
 
 	// 将任务装载进注册表并下订单
-	tasks.LoadAllTasks(registry, scheduler, cfg)
+	tasks.LoadAllTasks(tasks.LoadTestConfig{
+		Scheduler: scheduler,
+		Registry:  registry,
+		Cfg:       cfg,
+		Log:       engineLogger,
+	})
 
 	return &Server{
 		engine:    router.RegisterRoute(cfg, scheduler, *staticFS),

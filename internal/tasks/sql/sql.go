@@ -25,7 +25,7 @@ func NewSqlTask() core.Task {
 	return &SqlTask{
 		BaseTask: base_task.BaseTask{
 			Name:     TaskName,
-			TaskType: constants.TaskTypeSYSTEM,
+			TaskType: constants.TaskTypeAPI,
 		},
 	}
 }
