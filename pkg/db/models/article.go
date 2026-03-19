@@ -27,6 +27,8 @@ type SysArticle struct {
 
 	AITitle string `gorm:"size:255;comment:AI重拟的标题"`
 	Summary string `gorm:"type:text;comment:AI深度总结"`
+	// Translation: 面向中文读者的“精选翻译/要点译文”，不是全文机翻
+	Translation string `gorm:"type:longtext;comment:AI生成的原文翻译/译文要点" json:"translation"`
 
 	// 使用 GORM 的序列化功能，自动将 []string 转为 JSON 字符串存入数据库
 	Topics []string `gorm:"serializer:json;type:json;comment:技术话题标签"`
