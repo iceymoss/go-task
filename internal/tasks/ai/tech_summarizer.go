@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/exec"
@@ -499,4 +500,23 @@ func createSumArticle(token string, article ArticleCreateRequest) error {
 
 	fmt.Printf("文章创建成功！响应信息: %s\n", basicResp.Message)
 	return nil
+}
+
+func doRandomDelaySumArticle(ctx context.Context) {
+	// 生成 0 到 600 之间的随机整数 (包含 0 和 600)
+	minutes := rand.Intn(601)
+	delay := time.Duration(minutes) * time.Minute
+
+	log.Printf("💤 [AI Task] Sleeping for %d minutes (approx %.1f hours)...", minutes, float64(minutes)/60.0)
+
+	// 使用 time.NewTimer 替代 time.After，避免 timer 泄漏
+	timer := time.NewTimer(delay)
+	defer timer.Stop() // 确保函数退出时，无论因为什么原因，都清理掉 timer
+
+	select {
+	case <-timer.C:
+		log.Println("⏰ [AI Task] Waking up...")
+	case <-ctx.Done():
+		log.Println("⚠️ [AI Task] Context cancelled")
+	}
 }

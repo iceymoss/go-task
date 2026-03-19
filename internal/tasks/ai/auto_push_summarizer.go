@@ -54,7 +54,7 @@ func NewAutoPushSummarizerTask() core.Task {
 		BaseTask: base_task.BaseTask{
 			Name:        aiAutoPushSummarizerTaskName,
 			TaskType:    constants.TaskTypeSYSTEM,
-			DefaultCron: "@every 10m",
+			DefaultCron: "@every m" + fmt.Sprintf("@every %dm", 10*60),
 		},
 		params: AutoPushSummarizerTaskParams{
 			RemoteURL:   "git@github.com:iceymoss/iceymoss.github.io.git",
@@ -80,6 +80,8 @@ type AutoPushSummarizerTaskArticleCreateRequest struct {
 }
 
 func (t *AutoPushSummarizerTask) Run(ctx context.Context, params map[string]any) error {
+	doRandomDelayAutoPushSummarizer(ctx)
+
 	taskID := fmt.Sprintf("task_%d_%d", time.Now().Unix(), rand.Intn(1000))
 	repoLocalPath := filepath.Join(t.params.WorkDir, taskID)
 
@@ -447,4 +449,23 @@ func createAutoPushSummarizerTaskArticle(token string, article AutoPushSummarize
 
 	fmt.Printf("文章创建成功！响应信息: %s\n", basicResp.Message)
 	return nil
+}
+
+func doRandomDelayAutoPushSummarizer(ctx context.Context) {
+	// 生成 0 到 600 之间的随机整数 (包含 0 和 600)
+	minutes := rand.Intn(601)
+	delay := time.Duration(minutes) * time.Minute
+
+	log.Printf("💤 [AI Task] Sleeping for %d minutes (approx %.1f hours)...", minutes, float64(minutes)/60.0)
+
+	// 使用 time.NewTimer 替代 time.After，避免 timer 泄漏
+	timer := time.NewTimer(delay)
+	defer timer.Stop() // 确保函数退出时，无论因为什么原因，都清理掉 timer
+
+	select {
+	case <-timer.C:
+		log.Println("⏰ [AI Task] Waking up...")
+	case <-ctx.Done():
+		log.Println("⚠️ [AI Task] Context cancelled")
+	}
 }
