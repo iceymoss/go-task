@@ -26,7 +26,6 @@ import (
 	"github.com/iceymoss/go-task/pkg/logger"
 
 	"go.uber.org/zap"
-	"gorm.io/gorm"
 )
 
 const (
@@ -55,7 +54,7 @@ func NewAutoPushSummarizerTask() core.Task {
 		BaseTask: base_task.BaseTask{
 			Name:        aiAutoPushSummarizerTaskName,
 			TaskType:    constants.TaskTypeSYSTEM,
-			DefaultCron: "@every 10m",
+			DefaultCron: "@every 2m",
 		},
 		params: AutoPushSummarizerTaskParams{
 			RemoteURL:   "git@github.com:iceymoss/iceymoss.github.io.git",
@@ -99,36 +98,55 @@ func (t *AutoPushSummarizerTask) Run(ctx context.Context, params map[string]any)
 	// 读取数据库， 随机读取条数
 	rdb := db.GetRedisConn()
 	mysqlConn := db.GetMysqlConn(db.MYSQL_DB_GO_TASK)
-	res := rdb.Get(ctx, LastID)
+	res := rdb.Get(ctx, lastID)
 	if res.Err() != nil {
 		if !errors.Is(res.Err(), redis.Nil) {
 			return fmt.Errorf("get last id failed: %w", res.Err())
 		}
-		err := rdb.Set(ctx, LastID, 1, 0).Err()
+		err := rdb.Set(ctx, lastID, 1, 0).Err()
 		if err != nil {
 			return fmt.Errorf("set last id failed: %w", err)
 		}
+		// Reload so we can parse a real value below.
+		res = rdb.Get(ctx, lastID)
 	}
 
 	// 标准库，生成1-5之间的随机数
+	lastIDVal, err := res.Int64()
+	if err != nil {
+		return fmt.Errorf("parse last id failed: %w", err)
+	}
 	randNum := rand.Intn(5) + 1
 
-	lastId := res.Val()
-
 	var articles []models.SysArticle
-	dbRes := mysqlConn.Model(&models.SysArticle{}).Where("id > ?", lastId).Limit(randNum).Find(&articles)
+	dbRes := mysqlConn.Model(&models.SysArticle{}).
+		Where("id > ?", lastIDVal).
+		Order("id ASC").
+		Limit(randNum).
+		Find(&articles)
 	if dbRes.Error != nil {
-		if errors.Is(dbRes.Error, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("no articles found")
-		}
 		return fmt.Errorf("query articles failed: %w", dbRes.Error)
+	}
+
+	if len(articles) == 0 {
+		log.Println("No new articles found.")
+		return nil
+	}
+
+	// Login once and reuse the token for all articles in this run.
+	username := "ai_bot"
+	password := "admin123"
+	token, err := loginAutoPushSummarizerTask(username, password)
+	if err != nil {
+		logger.Error("登录失败: %v", zap.Error(err))
+		return err
 	}
 
 	for _, article := range articles {
 		log.Printf("🚀 [AutoPushSummarizerTask] Processing article: %s", article.Title)
 
 		input := saveFileInput{
-			RepoPath: t.params.WorkDir,
+			RepoPath: repoLocalPath,
 			Author:   t.params.AuthorName,
 			Title:    article.Title,
 			Content:  article.Summary,
@@ -147,20 +165,7 @@ func (t *AutoPushSummarizerTask) Run(ctx context.Context, params map[string]any)
 			return fmt.Errorf("git push failed: %w", err)
 		}
 
-		rdb.Set(ctx, LastID, article.ID+1, 0)
-
 		// 发布文章
-		// 1. 登录信息
-		username := "ai_bot"
-		password := "admin123"
-
-		// 执行登录获取 Token
-		token, err := loginAutoPushSummarizerTask(username, password)
-		if err != nil {
-			logger.Error("登录失败: %v", zap.Error(err))
-			return err
-		}
-
 		// 准备要创建的文章数据
 		newArticle := AutoPushSummarizerTaskArticleCreateRequest{
 			Title:       article.AITitle,
@@ -180,11 +185,12 @@ func (t *AutoPushSummarizerTask) Run(ctx context.Context, params map[string]any)
 			return err
 		}
 
-		log.Println("✅ Completed successfully.")
-		return nil
+		// Only advance the pointer after successful publish.
+		if err := rdb.Set(ctx, lastID, article.ID+1, 0).Err(); err != nil {
+			return fmt.Errorf("set last id failed: %w", err)
+		}
 	}
-
-	log.Println("No new articles found.")
+	log.Println("✅ Completed successfully.")
 	return nil
 }
 
