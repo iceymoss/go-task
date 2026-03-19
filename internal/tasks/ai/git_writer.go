@@ -68,10 +68,8 @@ func (t *WriterTask) Run(ctx context.Context, params map[string]any) error {
 		return fmt.Errorf("missing required params: api_key, remote_url, or ssh_key_path")
 	}
 
-	// 2. 随机延迟
-	if p.RandomDelay {
-		doRandomDelay(ctx)
-	}
+	// 随机延迟
+	doRandomDelay(ctx)
 
 	// 3. 准备工作目录
 	taskID := fmt.Sprintf("task_%d_%d", time.Now().Unix(), rand.Intn(1000))
