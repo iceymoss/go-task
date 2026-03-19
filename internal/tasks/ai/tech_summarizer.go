@@ -63,9 +63,10 @@ type SummarizerParams struct {
 
 // AIAnalysisResult  AI 返回的结构体 (用于解析 JSON)
 type AIAnalysisResult struct {
-	Title   string   `json:"title"`
-	Summary string   `json:"summary"`
-	Topics  []string `json:"topics"`
+	Title       string   `json:"title"`
+	Summary     string   `json:"summary"`
+	Topics      []string `json:"topics"`
+	Translation string   `json:"translation"`
 }
 
 func (t *TechSummarizerTask) Run(ctx context.Context, params map[string]any) error {
@@ -131,7 +132,8 @@ func (t *TechSummarizerTask) Run(ctx context.Context, params map[string]any) err
 				ContentHash:     hash,
 				AITitle:         analysis.Title,   // AI 的新标题
 				Summary:         analysis.Summary, // AI 的深度总结
-				Topics:          analysis.Topics,  // GORM 自动转为 JSON ["Go", "AI"]
+				Translation:     analysis.Translation,
+				Topics:          analysis.Topics, // GORM 自动转为 JSON ["Go", "AI"]
 				Source:          feed.Title,
 				CreatedAt:       now,
 				UpdatedAt:       now,
@@ -195,8 +197,15 @@ func (t *TechSummarizerTask) callAI(ctx context.Context, p SummarizerParams, con
    - 提取 1 到 3 个最核心的技术标签（如 ["Go", "Microservices", "K8s"]）。
    - 英文标签优先（如用 "Kubernetes" 而不是 "k8s"）。
 
-4. **输出格式**：
-   - 严格返回 JSON 格式：{"title": "...", "summary": "...", "topics": ["tag1", "tag2"]}
+4. **原文翻译/译文要点 (translation)**：
+   - 必须中文。
+   - 不是全文机翻：输出“精选译文/要点译文”，让中文读者不看原文也能理解关键段落含义。
+   - 建议用 Markdown 组织（允许使用标题/列表/引用块）。
+   - 关键术语保留英文并中文解释（如：一致性哈希（consistent hashing））。
+   - 如果原文包含关键代码/命令，原样保留最关键的 1-2 段，其余用中文解释。
+
+5. **输出格式**：
+   - 严格返回 JSON 格式：{"title":"...","summary":"...","topics":["tag1"],"translation":"..."}
    - 不要包含 Markdown 标记（如 '''json）。
 `, content)
 
@@ -228,9 +237,10 @@ func (t *TechSummarizerTask) callAI(ctx context.Context, p SummarizerParams, con
 		log.Printf("⚠️ JSON parse failed, raw content: %s", cleanJSON)
 		// 降级策略：如果 JSON 解析失败，把整个内容当作总结，标题用默认的
 		return &AIAnalysisResult{
-			Title:   "AI解析失败-原标题",
-			Summary: responseContent,
-			Topics:  []string{"ParseError"},
+			Title:       "AI解析失败-原标题",
+			Summary:     responseContent,
+			Topics:      []string{"ParseError"},
+			Translation: "",
 		}, nil
 	}
 

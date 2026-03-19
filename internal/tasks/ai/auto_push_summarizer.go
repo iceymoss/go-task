@@ -54,7 +54,7 @@ func NewAutoPushSummarizerTask() core.Task {
 		BaseTask: base_task.BaseTask{
 			Name:        aiAutoPushSummarizerTaskName,
 			TaskType:    constants.TaskTypeSYSTEM,
-			DefaultCron: "@every 2m",
+			DefaultCron: "@every 10m",
 		},
 		params: AutoPushSummarizerTaskParams{
 			RemoteURL:   "git@github.com:iceymoss/iceymoss.github.io.git",
@@ -167,10 +167,11 @@ func (t *AutoPushSummarizerTask) Run(ctx context.Context, params map[string]any)
 
 		// 发布文章
 		// 准备要创建的文章数据
+		content := buildAutoPushArticleMarkdown(article)
 		newArticle := AutoPushSummarizerTaskArticleCreateRequest{
 			Title:       article.AITitle,
-			Content:     article.Summary,
-			Summary:     strings.Join(article.Topics, ""),
+			Content:     content,
+			Summary:     summarizeForAutoPush(article.Summary, 180),
 			Cover:       "/uploads/images/2026/02/12/85a5205c-7c4f-49d3-81db-f542b5d7b502.jpg",
 			CategoryID:  23,
 			TagIDs:      []int{},
@@ -192,6 +193,56 @@ func (t *AutoPushSummarizerTask) Run(ctx context.Context, params map[string]any)
 	}
 	log.Println("✅ Completed successfully.")
 	return nil
+}
+
+func buildAutoPushArticleMarkdown(article models.SysArticle) string {
+	topics := make([]string, 0, len(article.Topics))
+	for _, t := range article.Topics {
+		t = strings.TrimSpace(t)
+		if t != "" {
+			topics = append(topics, t)
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString("## 要点速览\n\n")
+	b.WriteString(article.Summary)
+	b.WriteString("\n\n")
+
+	b.WriteString("## 原文信息\n\n")
+	if strings.TrimSpace(article.Title) != "" {
+		b.WriteString(fmt.Sprintf("- 原标题：%s\n", strings.TrimSpace(article.Title)))
+	}
+	if strings.TrimSpace(article.Source) != "" {
+		b.WriteString(fmt.Sprintf("- 来源：%s\n", strings.TrimSpace(article.Source)))
+	}
+	if strings.TrimSpace(article.Link) != "" {
+		b.WriteString(fmt.Sprintf("- 原文链接：%s\n", strings.TrimSpace(article.Link)))
+	}
+	if len(topics) > 0 {
+		b.WriteString(fmt.Sprintf("- 话题：%s\n", strings.Join(topics, " / ")))
+	}
+
+	if strings.TrimSpace(article.Translation) != "" {
+		b.WriteString("\n\n")
+		b.WriteString("## 原文翻译（精选）\n\n")
+		b.WriteString(strings.TrimSpace(article.Translation))
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+func summarizeForAutoPush(s string, maxRunes int) string {
+	s = strings.TrimSpace(s)
+	if s == "" || maxRunes <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	return strings.TrimSpace(string(r[:maxRunes])) + "…"
 }
 
 // -------------------------------------------------------------------------
