@@ -55,7 +55,7 @@ func NewAutoPushSummarizerTask() core.Task {
 		BaseTask: base_task.BaseTask{
 			Name:        aiAutoPushSummarizerTaskName,
 			TaskType:    constants.TaskTypeSYSTEM,
-			DefaultCron: "@every 1m",
+			DefaultCron: "@every 10m",
 		},
 		params: AutoPushSummarizerTaskParams{
 			RemoteURL:   "git@github.com:iceymoss/iceymoss.github.io.git",
