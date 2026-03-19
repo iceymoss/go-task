@@ -3,136 +3,195 @@ package engine
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
 	"github.com/iceymoss/go-task/internal/core"
-	"github.com/iceymoss/go-task/internal/tasks"
 
 	"github.com/robfig/cron/v3"
 )
 
-type Scheduler struct {
-	cron              *cron.Cron
-	Stats             *StatManager
-	DependencyManager *DependencyManager
-	EventManager      *EventManager
-	RetryManager      *RetryManager
-	TaskQueue         *TaskQueue
-	leaderElector     LeaderElector
-	leaderCancel      context.CancelFunc
-	registered        map[string]struct {
-		task     core.Task
-		params   map[string]any
-		chain    Chain
-		priority int
-	}
-	mu sync.RWMutex
+const (
+	defaultTaskTimeout = 2 * time.Hour
+)
+
+type JobDefinition struct {
+	creator  core.TaskCreator // 任务实现
+	params   map[string]any   // 任务参数
+	chain    Chain            // 任务链, 可以加入日志，重试，限流，日志，指标，历史记录等操作
+	priority int              // 任务优先级
+	timeout  time.Duration    // 任务超时时间
 }
 
-func NewScheduler() *Scheduler {
+type Scheduler struct {
+	cron              *cron.Cron               // 任务调度器
+	Stats             *StatManager             // 任务状态管理器
+	DependencyManager *DependencyManager       // 任务依赖管理器
+	EventManager      *EventManager            // 事件管理器
+	RetryManager      *RetryManager            // 重试管理器
+	TaskQueue         *TaskQueue               // 任务队列（可选，支持优先级和限流）
+	logger            Logger                   // 日志管理器
+	leaderElector     LeaderElector            // 选主器（可选，支持分布式部署）
+	leaderCancel      context.CancelFunc       // 选主停止函数
+	registry          *TaskRegistry            // 调度器持有一个菜单(注册表)
+	jobDefinition     map[string]JobDefinition // 存放具体的任务订单
+	mu                sync.RWMutex             // 保护 registered 和任务状态的并发访问
+}
+
+func NewScheduler(registry *TaskRegistry, opts ...Option) *Scheduler {
 	scheduler := &Scheduler{
 		cron:              cron.New(cron.WithSeconds()),
 		Stats:             NewStatManager(),
-		DependencyManager: NewDependencyManager(),
-		EventManager:      NewEventManager(),
-		RetryManager:      NewRetryManager(),
-		registered: make(map[string]struct {
-			task     core.Task
-			params   map[string]any
-			chain    Chain
-			priority int
-		}),
+		EventManager:      NewEventManager(NewDefaultLogger()),
+		DependencyManager: NewDependencyManager(NewDefaultLogger()),
+		jobDefinition:     make(map[string]JobDefinition),
+		registry:          registry,
 	}
 
-	// 设置全局事件管理器
-	SetGlobalEventManager(scheduler.EventManager)
+	// 应用外部传入的 Option (可以覆盖上面的默认值)
+	for _, opt := range opts {
+		opt(scheduler)
+	}
 
-	// 注册默认事件处理器
-	scheduler.EventManager.OnFunc(EventTypeBeforeJob, LoggingEventHandler())
-	scheduler.EventManager.OnFunc(EventTypeAfterJob, LoggingEventHandler())
-	scheduler.EventManager.OnFunc(EventTypeJobError, LoggingEventHandler())
-	scheduler.EventManager.OnFunc(EventTypeJobPanic, LoggingEventHandler())
-	scheduler.EventManager.OnFunc(EventTypeJobSkipped, LoggingEventHandler())
-	scheduler.EventManager.OnFunc(EventTypeJobRetry, LoggingEventHandler())
+	scheduler.RetryManager = NewRetryManager(scheduler.EventManager, scheduler.logger)
 
-	scheduler.EventManager.OnFunc(EventTypeAfterJob, MetricsEventHandler())
-	scheduler.EventManager.OnFunc(EventTypeJobError, MetricsEventHandler())
+	// 初始化任务队列（默认 10 个 worker）
+	scheduler.TaskQueue = NewTaskQueue(scheduler.runTaskWithStats, defaultWorkerNum, scheduler.logger)
 
-	// 任务历史记录
-	historyStorage := NewGormHistoryStorage()
-	scheduler.EventManager.OnFunc(EventTypeAfterJob, NewHistoryEventHandler(historyStorage))
-	scheduler.EventManager.OnFunc(EventTypeJobError, NewHistoryEventHandler(historyStorage))
+	WithDependencyLogger(scheduler.logger)
 
-	// 初始化任务队列（默认 4 个 worker）
-	scheduler.TaskQueue = NewTaskQueue(scheduler, 4)
+	// 事件监听 (日志、指标、依赖控制)
+	scheduler.EventManager.OnFunc(EventTypeBeforeJob, LoggingEventHandler(scheduler.logger))
+	scheduler.EventManager.OnFunc(EventTypeAfterJob, LoggingEventHandler(scheduler.logger))
+	scheduler.EventManager.OnFunc(EventTypeJobError, LoggingEventHandler(scheduler.logger))
+	scheduler.EventManager.OnFunc(EventTypeJobPanic, LoggingEventHandler(scheduler.logger))
+
+	scheduler.EventManager.OnFunc(EventTypeAfterJob, MetricsEventHandler(scheduler.logger))
+	scheduler.EventManager.OnFunc(EventTypeJobError, MetricsEventHandler(scheduler.logger))
+
+	scheduler.EventManager.OnFunc(EventTypeAfterJob, DependencyEventHandler(scheduler.DependencyManager, scheduler.EventManager))
+	scheduler.EventManager.OnFunc(EventTypeJobError, DependencyEventHandler(scheduler.DependencyManager, scheduler.EventManager))
+	scheduler.EventManager.OnFunc(EventTypeDependencyMet, DependencyMetEventHandler(scheduler, scheduler.logger))
+
+	scheduler.EventManager.OnFunc(EventTypeJobSkipped, LoggingEventHandler(scheduler.logger))
+	scheduler.EventManager.OnFunc(EventTypeJobRetry, LoggingEventHandler(scheduler.logger))
 
 	return scheduler
 }
 
+// Option 定义了调度器的配置选项
+type Option func(*Scheduler)
+
+// WithWorkerNum 配置任务队列的并发 worker 数量
+func WithWorkerNum(num int) Option {
+	return func(s *Scheduler) {
+		s.TaskQueue = NewTaskQueue(s.runTaskWithStats, num, s.logger)
+	}
+}
+
+// WithEventManager 允许外部注入一个完全自定义的事件管理器
+func WithEventManager(em *EventManager) Option {
+	return func(s *Scheduler) {
+		s.EventManager = em
+	}
+}
+
+// WithCronOptions 允许用户自定义底层 cron 的行为 (例如更换时区)
+func WithCronOptions(opts ...cron.Option) Option {
+	return func(s *Scheduler) {
+		s.cron = cron.New(opts...)
+	}
+}
+
+// WithHistoryStorage 允许用户注入自定义的历史记录存储器
+func WithHistoryStorage(storage HistoryStorage) Option {
+	return func(s *Scheduler) {
+		s.EventManager.OnFunc(EventTypeAfterJob, NewHistoryEventHandler(storage, s.logger))
+		s.EventManager.OnFunc(EventTypeJobError, NewHistoryEventHandler(storage, s.logger))
+	}
+}
+
+// WithLeaderElector 注入分布式选主器
+func WithLeaderElector(elector LeaderElector) Option {
+	return func(s *Scheduler) {
+		s.leaderElector = elector
+	}
+}
+
+// WithLogger 外部注入自定义的日志实现
+func WithLogger(log Logger) Option {
+	return func(s *Scheduler) {
+		if log != nil {
+			s.logger = log
+		}
+	}
+}
+
 // buildDefaultChain 为任务构建默认的执行链：
-// Logging + Metrics + RetryWithPolicy
+// Logging + Metrics + RetryWithPolicy + Timeout
 func (s *Scheduler) buildDefaultChain(taskName string) Chain {
 	return Chain{}.
 		Then(
-			Logging(taskName),
-			Metrics(taskName),
+			Logging(taskName, s.logger),
+			Metrics(taskName, s.logger),
 			RetryWithPolicy(s.RetryManager, taskName),
+			Timeout(defaultTaskTimeout),
 		)
 }
 
-// AddJob 添加任务
-func (s *Scheduler) AddJob(cronExpr, taskName, uniqueJobName string, params map[string]any, source string) error {
-	// 1. 获取任务实现
-	taskInstance, err := tasks.GetTask(taskName)
+// AddJob 向调度内核中动态注册并启动一个具体的任务实例 (Job Instance)。
+// 该方法支持“一模多跑”的高级特性：允许基于同一个底层任务模板 (taskName)，
+// 注入不同的动态参数和频率，生成多个互相隔离的运行实例 (uniqueJobName)。
+//
+// 参数说明:
+//   - cronExpr:      任务的执行频率，标准 Cron 表达式 (如 "@every 1m" 或 "0 * * * *")。
+//   - taskName:      任务模板名 (Template Name)，必须是已在 TaskRegistry 中注册的标识 (如 "sys:google_ping")，内核据此寻找执行逻辑。
+//   - uniqueJobName: 任务实例的全系统唯一标识 (Instance ID)，如 "job_ping_baidu"。内核依据此 ID 进行并发隔离、依赖拓扑构建、状态追踪及手动触发。
+//   - params:        该实例的专属运行时参数。执行前会与任务模板自带的 DefaultParams 发生合并与覆盖。
+//   - source:        任务来源标记 (如 "SYSTEM", "YAML", "API")，仅用于控制台展示、日志追踪与运维审计。
+//
+// 返回值:
+//   - error: 当传入的 taskName 在注册表中不存在，或 cronExpr 语法解析失败时，将拒绝挂载并返回错误。
+func (s *Scheduler) AddJob(cronExpr, taskName string, uniqueJobName string, params map[string]any, source string) error {
+	// 获取任务实现
+	creator, err := s.registry.Get(taskName)
 	if err != nil {
 		return err
 	}
 
-	// 2. 初始化状态
+	// 初始化状态
 	s.Stats.Set(uniqueJobName, &JobStats{
 		Name:       uniqueJobName,
 		CronExpr:   cronExpr,
-		Status:     "Idle",
-		LastResult: "Pending",
+		Status:     Idle,
+		LastResult: LastResultPending,
 		Source:     source,
 	})
 
 	// 保存引用以便手动触发
-	s.registered[uniqueJobName] = struct {
-		task     core.Task
-		params   map[string]any
-		chain    Chain
-		priority int
-	}{
-		task:     taskInstance,
+	s.mu.Lock()
+	s.jobDefinition[uniqueJobName] = JobDefinition{
+		creator:  creator,
 		params:   params,
 		chain:    s.buildDefaultChain(uniqueJobName),
 		priority: 0,
 	}
+	s.mu.Unlock()
 
-	// 3. 包装执行逻辑
+	// 包装执行逻辑
 	wrapper := func() {
-		// 统一通过队列执行，便于限流和优先级控制
-		if s.TaskQueue != nil {
-			s.mu.RLock()
-			reg := s.registered[uniqueJobName]
-			s.mu.RUnlock()
-			if err := s.TaskQueue.Enqueue(uniqueJobName, reg.priority); err != nil {
-				log.Printf("⚠️ [Schedule] Enqueue job failed: %s, err: %v", uniqueJobName, err)
-			}
-		} else {
-			s.runTaskWithStats(uniqueJobName)
-		}
+		s.Dispatch(uniqueJobName)
 	}
 
-	// 4. 加入 Cron
+	// 加入 Cron 底层任务调度器中，负责任务调度
 	entryID, err := s.cron.AddFunc(cronExpr, wrapper)
 	if err == nil {
-		stat := s.Stats.Get(uniqueJobName)
-		stat.rawNext = s.cron.Entry(entryID).Next
-		stat.NextRunTime = stat.rawNext.Format("2006-01-02 15:04:05")
+		stat, ok := s.Stats.Get(uniqueJobName)
+		if !ok {
+			return fmt.Errorf("⚠️ [Schedule] Job not jobDefinition: %s", uniqueJobName)
+		}
+		stat.RawNext = s.cron.Entry(entryID).Next
+		stat.NextRunTime = stat.RawNext.Format("2006-01-02 15:04:05")
 	}
 	return err
 }
@@ -141,18 +200,26 @@ func (s *Scheduler) AddJob(cronExpr, taskName, uniqueJobName string, params map[
 func (s *Scheduler) runTaskWithStats(name string) {
 	// 读取注册信息
 	s.mu.RLock()
-	reg, ok := s.registered[name]
+	reg, ok := s.jobDefinition[name]
 	s.mu.RUnlock()
 	if !ok {
-		log.Printf("⚠️ [Schedule] Job not registered: %s", name)
+		s.logger.Info("⚠️ [Schedule] Job not jobDefinition", "name", name)
 		return
 	}
 
-	task := reg.task
+	task := reg.creator()
 	params := reg.params
 	chain := reg.chain
+	timeout := reg.timeout
+	if timeout <= 0 {
+		timeout = defaultTaskTimeout
+	}
 
-	stat := s.Stats.Get(name)
+	stat, ok := s.Stats.Get(name)
+	if !ok {
+		s.logger.Info("⚠️ [Schedule] Job not jobDefinition", "name", name)
+		return
+	}
 	ctx := context.Background()
 
 	// 发射任务开始事件
@@ -163,36 +230,14 @@ func (s *Scheduler) runTaskWithStats(name string) {
 		Context:   ctx,
 	})
 
-	// 更新开始状态
-	stat.Status = "Waiting"
-	stat.LastRunTime = time.Now().Format("2006-01-02 15:04:05")
-	log.Printf("⏳ [Schedule] Job waiting for dependencies: %s", name)
-
-	// 检查依赖关系
-	if err := s.DependencyManager.WaitForDependencies(name); err != nil {
-		stat.LastResult = fmt.Sprintf("Dependency error: %v", err)
-		stat.Status = "Error"
-		s.DependencyManager.UpdateTaskStatus(name, false, err)
-		log.Printf("❌ [Schedule] Job dependency check failed: %s, err: %v", name, err)
-
-		s.EventManager.Emit(&Event{
-			Type:      EventTypeJobError,
-			TaskName:  name,
-			TimeStamp: time.Now(),
-			Context:   ctx,
-			Error:     err,
-		})
-		return
-	}
-
 	// 更新为运行状态
-	stat.Status = "Running"
+	stat.Status = Running
 	stat.RunCount++
 
-	log.Printf("🚀 [Schedule] Starting job: %s", name)
+	s.logger.Info("🚀 [Schedule] Starting job", "name", name)
 
 	// 执行 (带超时控制)
-	ctx, cancel := context.WithTimeout(context.Background(), 65*time.Minute) // 考虑到有休眠，时间给长一点
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	startTime := time.Now()
@@ -212,10 +257,10 @@ func (s *Scheduler) runTaskWithStats(name string) {
 
 	// 更新结束状态
 	if err != nil {
-		stat.LastResult = fmt.Sprintf("Error: %v", err)
-		stat.Status = "Error"
+		stat.LastResult = fmt.Sprintf(LastResultError, err)
+		stat.Status = Error
 		s.DependencyManager.UpdateTaskStatus(name, false, err)
-		log.Printf("❌ [Schedule] Job failed: %s, err: %v", name, err)
+		s.logger.Info(fmt.Sprintf("❌ [Schedule] Job failed: %s, err: %v", name, err))
 
 		s.EventManager.Emit(&Event{
 			Type:      EventTypeJobError,
@@ -229,10 +274,10 @@ func (s *Scheduler) runTaskWithStats(name string) {
 			},
 		})
 	} else {
-		stat.LastResult = "Success"
-		stat.Status = "Idle"
+		stat.LastResult = LastResultSuccess
+		stat.Status = Idle
 		s.DependencyManager.UpdateTaskStatus(name, true, nil)
-		log.Printf("✅ [Schedule] Job finished: %s", name)
+		s.logger.Info("✅ [Schedule] Job finished", "name", name)
 
 		s.EventManager.Emit(&Event{
 			Type:      EventTypeAfterJob,
@@ -249,7 +294,7 @@ func (s *Scheduler) runTaskWithStats(name string) {
 
 // ManualRun 手动触发
 func (s *Scheduler) ManualRun(uniqueJobName string) error {
-	reg, ok := s.registered[uniqueJobName]
+	reg, ok := s.jobDefinition[uniqueJobName]
 	if !ok {
 		return fmt.Errorf("job not found")
 	}
@@ -264,15 +309,15 @@ func (s *Scheduler) ManualRun(uniqueJobName string) error {
 }
 
 // AddJobWithDependency 添加带依赖的任务
-func (s *Scheduler) AddJobWithDependency(cronExpr, taskName, uniqueJobName string, params map[string]any, source string, dependencyRule *DependencyRule) error {
-	// 1. 先添加依赖规则
+func (s *Scheduler) AddJobWithDependency(cronExpr, taskName string, uniqueJobName string, params map[string]any, source string, dependencyRule *DependencyRule) error {
+	// 先添加依赖规则
 	if dependencyRule != nil {
 		if err := s.DependencyManager.AddDependency(dependencyRule); err != nil {
 			return fmt.Errorf("failed to add dependency: %w", err)
 		}
 	}
 
-	// 2. 添加任务
+	// 添加任务
 	return s.AddJob(cronExpr, taskName, uniqueJobName, params, source)
 }
 
@@ -284,6 +329,51 @@ func (s *Scheduler) GetDependencyChain(taskName string) ([]string, error) {
 // GetDependentTasks 获取依赖于指定任务的所有任务
 func (s *Scheduler) GetDependentTasks(taskName string) []string {
 	return s.DependencyManager.GetDependentTasks(taskName)
+}
+
+// Dispatch 尝试分发任务：如果依赖未满足则挂起(标记为Waiting)，否则真正入队
+func (s *Scheduler) Dispatch(name string) {
+	// 统一通过队列执行，便于限流和优先级控制
+	// 加入任务队列后，TaskQueue初始化时开启的worker会自动从队列中获取任务进行处理
+
+	s.mu.RLock()
+	reg, ok := s.jobDefinition[name]
+	s.mu.RUnlock()
+	if !ok {
+		return
+	}
+
+	stat, ok := s.Stats.Get(name)
+	if !ok {
+		s.logger.Info("⚠️ [Schedule] Job not jobDefinition", "name", name)
+		return
+	}
+
+	// 无阻塞检查依赖状态
+	satisfied, err := s.DependencyManager.CheckDependencies(name)
+	if err != nil {
+		stat.Status = Error
+		stat.LastResult = fmt.Sprintf(LastResultDependencyCheck, err)
+		s.logger.Info("❌ [Dispatcher] Job dependency check failed", "name", name, err)
+		return
+	}
+
+	// 依赖未满足，仅仅标记为挂起等待,避免不占用 Worker 协程
+	if !satisfied {
+		stat.Status = Waiting
+		s.logger.Info("⏳ [Dispatcher] Job triggered but waiting for upstream dependencies...", "name", name)
+		return
+	}
+
+	// 依赖已完全满足，推入真实执行队列
+	stat.Status = Queued
+	if s.TaskQueue != nil {
+		if err := s.TaskQueue.Enqueue(name, reg.priority); err != nil {
+			s.logger.Info("⚠️ [Dispatcher] Enqueue job failed", "name", name, err)
+		}
+	} else {
+		go s.runTaskWithStats(name)
+	}
 }
 
 // RegisterEventHandler 注册事件处理器
@@ -308,17 +398,26 @@ func (s *Scheduler) Start() {
 		return
 	}
 
+	// 定义抢到 Leader 和失去 Leader 时的动作
+	onStarted := func() {
+		s.logger.Info("👑 [Scheduler] This instance became leader, starting cron")
+		s.cron.Start()
+	}
+	onStopped := func() {
+		s.logger.Info("👋 [Scheduler] Lost leadership, stopping cron")
+		s.cron.Stop()
+	}
+
 	// 有 Leader 选举时，由 LeaderElector 决定什么时候启动/停止 cron
 	ctx, cancel := context.WithCancel(context.Background())
 	s.leaderCancel = cancel
 
-	go func() {
-		if err := s.leaderElector.Start(ctx); err != nil {
-			// 选主失败时，降级为单机模式，直接启动 cron
-			log.Printf("⚠️ [Scheduler] Leader election start failed, fallback to single-node: %v", err)
-			s.cron.Start()
-		}
-	}()
+	err := s.leaderElector.Start(ctx, onStarted, onStopped)
+	if err != nil {
+		// 绝对不能 fallback 到 s.cron.Start() 如果启动多实例，会导致重复执行
+		// 应该直接 Fatal，让程序起不来，引起运维注意，防止脑裂。
+		s.logger.Fatal("[Scheduler] Fatal error: Leader election failed to start", err)
+	}
 }
 func (s *Scheduler) Stop() {
 	if s.leaderCancel != nil {
@@ -327,6 +426,8 @@ func (s *Scheduler) Stop() {
 	if s.leaderElector != nil {
 		_ = s.leaderElector.Stop(context.Background())
 	}
+
+	s.EventManager.Stop()
 
 	s.cron.Stop()
 	if s.TaskQueue != nil {
@@ -339,10 +440,10 @@ func (s *Scheduler) SetPriority(taskName string, priority int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	reg, ok := s.registered[taskName]
+	reg, ok := s.jobDefinition[taskName]
 	if !ok {
 		return
 	}
 	reg.priority = priority
-	s.registered[taskName] = reg
+	s.jobDefinition[taskName] = reg
 }

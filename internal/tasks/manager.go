@@ -1,78 +1,76 @@
 package tasks
 
 import (
-	"fmt"
-	"log"
-	"sync"
-
+	"github.com/iceymoss/go-task/internal/conf"
 	"github.com/iceymoss/go-task/internal/core"
+	"github.com/iceymoss/go-task/internal/engine"
+	"github.com/iceymoss/go-task/internal/tasks/ai"
+	"github.com/iceymoss/go-task/internal/tasks/email"
+	"github.com/iceymoss/go-task/internal/tasks/network"
+	"github.com/iceymoss/go-task/internal/tasks/shell"
+	"github.com/iceymoss/go-task/internal/tasks/sql"
 	"github.com/iceymoss/go-task/pkg/constants"
 )
 
-type Scheduler interface {
-	AddJob(cronExpr, taskName, uniqueJobName string, params map[string]any, source string) error
+type LoadTestConfig struct {
+	Registry  *engine.TaskRegistry
+	Scheduler *engine.Scheduler
+	Cfg       *conf.Config
+	Log       engine.Logger
 }
 
-func ApplyAutoJobs(sched Scheduler) {
-	mu.RLock()
-	defer mu.RUnlock()
+// LoadAllTasks 统一装配, 负责将任务注册到菜单，并交给调度器运行
+func LoadAllTasks(load LoadTestConfig) {
+	var allCreators []core.TaskCreator
+	allCreators = append(allCreators, ai.Creators()...)
+	allCreators = append(allCreators, email.Creators()...)
+	allCreators = append(allCreators, network.Creators()...)
+	allCreators = append(allCreators, sql.Creators()...)
+	allCreators = append(allCreators, shell.Creators()...)
 
-	for _, job := range autoJobs {
-		fmt.Println("注册自动任务中：", job.Name)
-		// 调用调度器添加任务
-		err := sched.AddJob(job.Cron, job.Name, job.Name, job.Params, string(constants.TaskTypeSYSTEM))
-		if err != nil {
-			log.Printf("❌ [AutoLoad] Failed to load %s: %v", job.Name, err)
-		} else {
-			log.Printf("✅ [AutoLoad] Loaded: %s [%s]", job.Name, job.Cron)
+	for _, creator := range allCreators {
+		task := creator()
+		name := task.Identifier()
+
+		// 将所有任务执行逻辑都注册到任务注册中心
+		load.Registry.Register(name, creator)
+
+		// 如果是系统任务，直接将对应的系统任务参数添加到调度器中
+		if task.GetTaskType() == constants.TaskTypeSYSTEM {
+			err := load.Scheduler.AddJob(
+				task.GetDefaultCron(),
+				name,
+				name,
+				task.GetDefaultParams(),
+				string(task.GetTaskType()),
+			)
+			if err != nil {
+				load.Log.Error("add system job failed", "task_name", name, err)
+			}
 		}
 	}
-}
 
-// AutoJob 定义一个“自启动任务”的结构
-type AutoJob struct {
-	Name    string           // 任务唯一标识
-	Cron    string           // Cron 表达式
-	Creator core.TaskCreator // 构造函数
-	Params  map[string]any   // 默认参数
-}
+	// 处理外部 YAML 的覆盖配置
+	for _, job := range load.Cfg.Jobs {
+		if !job.Enable {
+			continue
+		}
 
-var (
-	registry = make(map[string]core.TaskCreator) // 普通任务注册（供 Config 调用）
-	autoJobs = make([]*AutoJob, 0)               // 自动任务列表（供代码直接启动）
-	mu       sync.RWMutex
-)
+		cronExpr := job.Cron
+		if cronExpr == "" { // 如果 YAML 没配时间，读任务内置时间
+			if creator, err := load.Registry.Get(job.Name); err == nil {
+				cronExpr = creator().GetDefaultCron()
+				if cronExpr == "" {
+					load.Log.Error("task has no cron", "task_name", job.Name)
+					continue
+				}
+			}
+		}
 
-// Register 保持不变，供 Config 使用
-func Register(name string, creator core.TaskCreator) {
-	mu.Lock()
-	defer mu.Unlock()
-	registry[name] = creator
-}
-
-// RegisterAuto 注册并自动启动 开发者只需要在自己的 task 文件里调这个，就能把“逻辑+配置”一站式搞定
-func RegisterAuto(name string, cron string, creator core.TaskCreator, defaultParams map[string]any) {
-	mu.Lock()
-	defer mu.Unlock()
-
-	// 1. 先注册到普通池子（这样 Web 界面也能手动触发）
-	registry[name] = creator
-
-	// 2. 加入自动启动列表
-	autoJobs = append(autoJobs, &AutoJob{
-		Name:    name,
-		Cron:    cron,
-		Creator: creator,
-		Params:  defaultParams,
-	})
-}
-
-func GetTask(name string) (core.Task, error) {
-	mu.RLock()
-	defer mu.RUnlock()
-	creator, ok := registry[name]
-	if !ok {
-		return nil, fmt.Errorf("task implementation '%s' not found", name)
+		err := load.Scheduler.AddJob(cronExpr, job.Name, job.Name, job.Params, string(constants.TaskTypeYAML))
+		if err != nil {
+			load.Log.Error("add config job failed", "task_name", job.Name, err)
+		}
 	}
-	return creator(), nil
+
 }

@@ -1,35 +1,49 @@
 package ai
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/iceymoss/go-task/internal/core"
-	"github.com/iceymoss/go-task/internal/tasks"
+	"github.com/iceymoss/go-task/internal/tasks/base_task"
+	"github.com/iceymoss/go-task/pkg/constants"
 	"github.com/iceymoss/go-task/pkg/db"
-	"github.com/iceymoss/go-task/pkg/db/objects"
-
+	"github.com/iceymoss/go-task/pkg/db/models"
 	"github.com/mmcdole/gofeed"
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/openai"
 	"gorm.io/gorm"
 )
 
-// TechSummarizerTask 结构体
-type TechSummarizerTask struct{}
+const (
+	aiTecSummarizerTaskName = "ai:tech_summarizer"
+)
 
-func init() {
-	tasks.Register("ai:tech_summarizer", NewTechSummarizerTask)
+// TechSummarizerTask 结构体
+type TechSummarizerTask struct {
+	base_task.BaseTask
 }
 
 func NewTechSummarizerTask() core.Task {
-	return &TechSummarizerTask{}
+	return &TechSummarizerTask{
+		BaseTask: base_task.BaseTask{
+			Name:     aiTecSummarizerTaskName,
+			TaskType: constants.TaskTypeYAML,
+		},
+	}
 }
 
 func (t *TechSummarizerTask) Identifier() string {
@@ -38,10 +52,13 @@ func (t *TechSummarizerTask) Identifier() string {
 
 // SummarizerParams 任务参数
 type SummarizerParams struct {
-	ApiKey  string   `json:"api_key"`
-	BaseURL string   `json:"base_url"`
-	Model   string   `json:"model"`
-	Sources []string `json:"sources"` // RSS 源列表
+	ApiKey     string   `json:"api_key"`
+	BaseURL    string   `json:"base_url"`
+	Model      string   `json:"model"`
+	Sources    []string `json:"sources"`      // RSS 源列表
+	RemoteURL  string   `json:"remote_url"`   // Git 远程地址
+	WorkDir    string   `json:"work_dir"`     // 工作目录
+	SSHKeyPath string   `json:"ssh_key_path"` // SSH 私钥路径
 }
 
 // AIAnalysisResult  AI 返回的结构体 (用于解析 JSON)
@@ -61,7 +78,7 @@ func (t *TechSummarizerTask) Run(ctx context.Context, params map[string]any) err
 	dbConn := db.GetMysqlConn(db.MYSQL_DB_GO_TASK)
 
 	// 自动迁移表结构 (为了方便，生产环境建议手动建表)
-	_ = dbConn.AutoMigrate(&objects.SysArticle{})
+	_ = dbConn.AutoMigrate(&models.SysArticle{})
 
 	totalProcessed := 0
 
@@ -108,16 +125,16 @@ func (t *TechSummarizerTask) Run(ctx context.Context, params map[string]any) err
 
 			now := time.Now()
 			// 5. 存入数据库
-			article := &objects.SysArticle{
-				Title:       item.Title,
-				Link:        item.Link,
-				ContentHash: hash,
-				AITitle:     analysis.Title,   // AI 的新标题
-				Summary:     analysis.Summary, // AI 的深度总结
-				Topics:      analysis.Topics,  // GORM 自动转为 JSON ["Go", "AI"]
-				Source:      feed.Title,
-				CreatedAt:   now,
-				UpdatedAt:   now,
+			article := &models.SysArticle{
+				Title:           item.Title,
+				Link:            item.Link,
+				ContentHash:     hash,
+				AITitle:         analysis.Title,   // AI 的新标题
+				Summary:         analysis.Summary, // AI 的深度总结
+				Topics:          analysis.Topics,  // GORM 自动转为 JSON ["Go", "AI"]
+				Source:          feed.Title,
+				CreatedAt:       now,
+				UpdatedAt:       now,
 				PublishedParsed: now,
 			}
 			if err := dbConn.Create(article).Error; err != nil {
@@ -234,7 +251,7 @@ func (t *TechSummarizerTask) calculateHash(s string) string {
 // isDuplicate 检查是否已存在
 func (t *TechSummarizerTask) isDuplicate(db *gorm.DB, hash string) bool {
 	var count int64
-	db.Model(&objects.SysArticle{}).Where("content_hash = ?", hash).Count(&count)
+	db.Model(&models.SysArticle{}).Where("content_hash = ?", hash).Count(&count)
 	return count > 0
 }
 
@@ -281,4 +298,195 @@ func (t *TechSummarizerTask) parseParams(params map[string]any) SummarizerParams
 	}
 
 	return p
+}
+
+// -------------------------------------------------------------------------
+// 辅助函数 (Git 操作 & 文件处理)
+// -------------------------------------------------------------------------
+
+func (t *TechSummarizerTask) gitClone(ctx context.Context, remoteURL, localPath, sshKeyPath string) error {
+	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+		return err
+	}
+	sshCmd := fmt.Sprintf("ssh -i %s -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null", sshKeyPath)
+	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", remoteURL, localPath)
+	cmd.Env = append(os.Environ(), "GIT_SSH_COMMAND="+sshCmd)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("output: %s, error: %w", string(out), err)
+	}
+	return nil
+}
+
+func (t *TechSummarizerTask) gitPush(ctx context.Context, repoPath, filename string, p WriterParams, sshKeyPath string) error {
+	sshCmd := fmt.Sprintf("ssh -i %s -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null", sshKeyPath)
+	env := append(os.Environ(), "GIT_SSH_COMMAND="+sshCmd)
+
+	run := func(args ...string) error {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = repoPath
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("git %v failed: %s, out: %s", args, err, string(out))
+		}
+		return nil
+	}
+
+	_ = run("config", "user.name", p.AuthorName)
+	_ = run("config", "user.email", p.AuthorEmail)
+
+	if err := run("add", "."); err != nil {
+		return err
+	}
+
+	commitMsg := fmt.Sprintf("feat: auto post %s", filename)
+	if err := run("commit", "-m", commitMsg); err != nil {
+		log.Println("⚠️ No changes to commit.")
+		return nil
+	}
+
+	return run("push", "origin", "HEAD:main")
+}
+
+func (t *TechSummarizerTask) saveFile(repoPath, author, title, content string) (string, error) {
+	safeTitle := strings.ReplaceAll(title, " ", "_")
+	safeTitle = strings.ReplaceAll(safeTitle, "/", "-")
+	filename := fmt.Sprintf("%s-%s.md", time.Now().Format("2006-01-02"), safeTitle)
+
+	fullDir := filepath.Join(repoPath, "posts")
+	fullPath := filepath.Join(fullDir, filename)
+
+	if err := os.MkdirAll(fullDir, 0755); err != nil {
+		return "", err
+	}
+
+	fileContent := fmt.Sprintf("---\ntitle: %s\ndate: %s\nauthor: %s\n---\n\n%s",
+		title, time.Now().Format(time.RFC3339), author, content)
+
+	return filename, os.WriteFile(fullPath, []byte(fileContent), 0644)
+}
+
+// ==================== 配置常量 ====================
+
+const (
+	BaseURLTechSummarizerTask        = "http://is.iceymoss.com"
+	LoginEndpointTechSummarizerTask  = BaseURL + "/api/login"
+	CreateEndpointTechSummarizerTask = BaseURL + "/api/articles"
+	UserAgentTechSummarizerTask      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36"
+)
+
+// 全局 HTTP 客户端，配置了跳过 TLS 验证 (对应 --insecure)
+var httpClientTechSummarizerTask = &http.Client{
+	Timeout: time.Second * 30,
+	Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	},
+}
+
+// ==================== 核心函数 ====================
+
+// login 执行登录操作并返回 Token
+func loginTechSummarizerTask(username, password string) (string, error) {
+	fmt.Println("正在发起登录请求...")
+
+	// 1. 准备请求数据
+	reqBody := LoginRequest{
+		Username: username,
+		Password: password,
+	}
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("序列化登录请求失败: %v", err)
+	}
+
+	// 2. 创建 HTTP 请求
+	req, err := http.NewRequest(http.MethodPost, LoginEndpoint, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return "", fmt.Errorf("创建登录请求失败: %v", err)
+	}
+
+	// 3. 设置必要的请求头
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", UserAgent)
+	// 添加 curl 中其他的 header，虽然不一定是必须的，但为了保持一致性
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Referer", BaseURL+"/login")
+	req.Header.Set("Origin", BaseURL)
+
+	// 4. 发送请求
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("发送登录请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// 5. 读取并解析响应
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取登录响应失败: %v", err)
+	}
+
+	var loginResp LoginResponse
+	if err := json.Unmarshal(respBytes, &loginResp); err != nil {
+		return "", fmt.Errorf("解析登录响应 JSON 失败: %v, 原始内容: %s", err, string(respBytes))
+	}
+
+	// 6. 检查业务状态码
+	if loginResp.Code != 0 {
+		return "", fmt.Errorf("登录失败，API返回错误: [%d] %s", loginResp.Code, loginResp.Message)
+	}
+
+	fmt.Println("登录成功！")
+	return loginResp.Data.Token, nil
+}
+
+// createArticle 使用 Token 创建文章
+func createSumArticle(token string, article ArticleCreateRequest) error {
+	fmt.Println("\n正在发起创建文章请求...")
+
+	// 1. 准备请求数据
+	jsonBody, err := json.Marshal(article)
+	if err != nil {
+		return fmt.Errorf("序列化文章数据失败: %v", err)
+	}
+
+	// 2. 创建 HTTP 请求
+	req, err := http.NewRequest(http.MethodPost, CreateEndpoint, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return fmt.Errorf("创建文章请求失败: %v", err)
+	}
+
+	// 3. 设置必要的请求头，最重要的是 Authorization
+	// 注意 Bearer 后面的空格
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("Referer", BaseURL+"/dashboard/articles/create")
+
+	// 4. 发送请求
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("发送创建文章请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// 5. 读取并解析响应
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取文章创建响应失败: %v", err)
+	}
+
+	var basicResp BasicResponse
+	if err := json.Unmarshal(respBytes, &basicResp); err != nil {
+		// 如果解析 JSON 失败，打印原始响应体以便调试
+		return fmt.Errorf("解析文章创建响应 JSON 失败: %v, 原始内容: %s", err, string(respBytes))
+	}
+
+	// 6. 检查业务状态码
+	if basicResp.Code != 0 {
+		return fmt.Errorf("创建文章失败，API返回错误: [%d] %s", basicResp.Code, basicResp.Message)
+	}
+
+	fmt.Printf("文章创建成功！响应信息: %s\n", basicResp.Message)
+	return nil
 }

@@ -3,11 +3,8 @@ package engine
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
-
-	"github.com/iceymoss/go-task/pkg/logger"
-
-	"go.uber.org/zap"
 )
 
 // EventType 事件类型
@@ -23,14 +20,49 @@ const (
 	EventTypeDependencyMet EventType = "dependency_met" // 依赖满足
 )
 
+const (
+	EventBufferSize = 2000
+	eventWorkerNum  = 10
+)
+
+// EventOption 定义事件管理器的配置项
+type EventOption func(*EventManager)
+
+// WithEventWorkerNum 配置事件消费者的并发数
+func WithEventWorkerNum(num int) EventOption {
+	return func(em *EventManager) {
+		if num > 0 {
+			em.workerNum = num
+		}
+	}
+}
+
+// WithEventBufferSize 配置事件队列的缓冲大小 (名字留给它用)
+func WithEventBufferSize(size int) EventOption {
+	return func(em *EventManager) {
+		if size > 0 {
+			em.bufferSize = size
+		}
+	}
+}
+
+func WithEventLogger(logger Logger) EventOption {
+	return func(em *EventManager) {
+		if logger != nil {
+			em.logger = logger
+		}
+	}
+}
+
 // Event 任务事件
 type Event struct {
-	Type      EventType // 事件类型
-	TaskName  string    // 任务名称
-	TimeStamp time.Time // 时间戳
-	Context   context.Context
-	Error     error          // 错误信息（如果有）
-	Data      map[string]any // 附加数据
+	Type      EventType       // 事件类型
+	TaskName  string          // 任务名称
+	ExecID    string          // 执行id
+	TimeStamp time.Time       // 时间戳
+	Context   context.Context // 上下文
+	Error     error           // 错误信息
+	Data      map[string]any  // 附加数据
 }
 
 // EventHandler 事件处理器接口
@@ -47,14 +79,75 @@ func (f EventHandlerFunc) Handle(event *Event) {
 
 // EventManager 事件管理器
 type EventManager struct {
-	handlers map[EventType][]EventHandler
-	mu       sync.RWMutex
+	handlers map[EventType][]EventHandler // 事件类型 -> 处理器列表
+	mu       sync.RWMutex                 // 保护 handlers 的并发访问
+
+	eventChan chan *Event    // 缓冲通道
+	wg        sync.WaitGroup // 用于优雅停机
+	closed    int32          // 是否已关闭
+
+	logger Logger
+
+	workerNum  int
+	bufferSize int
 }
 
 // NewEventManager 创建事件管理器
-func NewEventManager() *EventManager {
-	return &EventManager{
-		handlers: make(map[EventType][]EventHandler),
+func NewEventManager(logger Logger, opts ...EventOption) *EventManager {
+	em := &EventManager{
+		handlers:   make(map[EventType][]EventHandler),
+		workerNum:  eventWorkerNum,
+		bufferSize: EventBufferSize,
+		logger:     logger,
+	}
+
+	// 应用用户传入的配置选项进行覆盖
+	for _, opt := range opts {
+		opt(em)
+	}
+
+	// 必须在配置确定之后，再分配内存和启动协程！
+	em.eventChan = make(chan *Event, em.bufferSize)
+	for i := 0; i < em.workerNum; i++ {
+		em.wg.Add(1)
+		go em.workerLoop()
+	}
+
+	return em
+}
+
+// workerLoop 后台循环消费逻辑, 监听事件通道处理事件
+func (em *EventManager) workerLoop() {
+	defer em.wg.Done()
+
+	for event := range em.eventChan {
+		em.mu.RLock()
+		handlers := em.handlers[event.Type]
+		em.mu.RUnlock()
+
+		// 在同一个协程里依次执行处理器
+		for _, handler := range handlers {
+			// 单独捕获每个 handler
+			func(h EventHandler) {
+				defer func() {
+					if r := recover(); r != nil {
+						em.logger.Error("❌ [EventManager] Panic in event handler",
+							"panic", r,
+							"event_type", string(event.Type),
+							"task_name", event.TaskName,
+						)
+					}
+				}()
+				h.Handle(event)
+			}(handler)
+		}
+	}
+}
+
+func (em *EventManager) Stop() {
+	if atomic.CompareAndSwapInt32(&em.closed, 0, 1) {
+		close(em.eventChan) // 关闭通道，通知所有 worker 退出
+		em.wg.Wait()        // 等待所有仍在处理中的事件保存完毕（比如等待最后几条历史记录写入 DB）
 	}
 }
 
@@ -64,9 +157,7 @@ func (em *EventManager) On(eventType EventType, handler EventHandler) {
 	defer em.mu.Unlock()
 
 	em.handlers[eventType] = append(em.handlers[eventType], handler)
-	logger.Info("📡 [EventManager] Registered event handler",
-		zap.String("event_type", string(eventType)),
-	)
+	em.logger.Info("📡 [EventManager] Registered event handler", "event_type", string(eventType))
 }
 
 // OnFunc 注册函数类型的事件处理器
@@ -76,30 +167,18 @@ func (em *EventManager) OnFunc(eventType EventType, handlerFunc func(event *Even
 
 // Emit 发射事件
 func (em *EventManager) Emit(event *Event) {
-	em.mu.RLock()
-	handlers := em.handlers[event.Type]
-	em.mu.RUnlock()
-
-	// 在新的goroutine中执行所有处理器，避免阻塞
-	for _, handler := range handlers {
-		go func(h EventHandler) {
-			defer func() {
-				if r := recover(); r != nil {
-					logger.Error("❌ [EventManager] Panic in event handler",
-						zap.Any("panic", r),
-						zap.String("event_type", string(event.Type)),
-						zap.String("task_name", event.TaskName),
-					)
-				}
-			}()
-			h.Handle(event)
-		}(handler)
+	if atomic.LoadInt32(&em.closed) == 1 {
+		return
 	}
 
-	logger.Debug("📡 [EventManager] Emitted event",
-		zap.String("event_type", string(event.Type)),
-		zap.String("task_name", event.TaskName),
-	)
+	// 采用 select 结构非阻塞投递
+	// 如果极端情况下通道塞满了（比如数据库宕机导致消费极慢），直接丢弃事件或打印警告，绝不阻塞主调度流程！
+	select {
+	case em.eventChan <- event:
+		em.logger.Debug("📡 [EventManager] Emitted event to queue", "event_type", string(event.Type))
+	default:
+		em.logger.Warn("⚠️ [EventManager] Event channel is full, dropping event! Consider increasing buffer size.", "task_name", event.TaskName)
+	}
 }
 
 // Remove 移除指定事件类型的所有处理器
@@ -113,39 +192,39 @@ func (em *EventManager) Remove(eventType EventType) {
 // ==================== 预定义的事件处理器 ====================
 
 // LoggingEventHandler 记录事件日志
-func LoggingEventHandler() EventHandlerFunc {
+func LoggingEventHandler(log Logger) EventHandlerFunc {
 	return func(event *Event) {
-		fields := []zap.Field{
-			zap.String("event_type", string(event.Type)),
-			zap.String("task_name", event.TaskName),
-			zap.Time("timestamp", event.TimeStamp),
+		fields := []any{
+			"event_type", string(event.Type),
+			"task_name", event.TaskName,
+			"timestamp", event.TimeStamp,
 		}
 
 		if event.Error != nil {
-			fields = append(fields, zap.Error(event.Error))
+			fields = append(fields, "error", event.Error)
 		}
 
 		switch event.Type {
 		case EventTypeBeforeJob:
-			logger.Info("🚀 [Event] Job starting", fields...)
+			log.Info("🚀 [Event] Job starting", fields...)
 		case EventTypeAfterJob:
-			logger.Info("✅ [Event] Job completed", fields...)
+			log.Info("✅ [Event] Job completed", fields...)
 		case EventTypeJobError:
-			logger.Error("❌ [Event] Job failed", fields...)
+			log.Error("❌ [Event] Job failed", fields...)
 		case EventTypeJobPanic:
-			logger.Error("💥 [Event] Job panicked", fields...)
+			log.Error("💥 [Event] Job panicked", fields...)
 		case EventTypeJobSkipped:
-			logger.Info("⏭️ [Event] Job skipped", fields...)
+			log.Info("⏭️ [Event] Job skipped", fields...)
 		case EventTypeJobRetry:
-			logger.Warn("🔄 [Event] Job retrying", fields...)
+			log.Warn("🔄 [Event] Job retrying", fields...)
 		case EventTypeDependencyMet:
-			logger.Info("✅ [Event] Dependencies met", fields...)
+			log.Info("✅ [Event] Dependencies met", fields...)
 		}
 	}
 }
 
 // MetricsEventHandler 记录事件指标（用于后续集成Prometheus）
-func MetricsEventHandler() EventHandlerFunc {
+func MetricsEventHandler(log Logger) EventHandlerFunc {
 	return func(event *Event) {
 		// TODO: 这里可以集成Prometheus指标
 		// switch event.Type {
@@ -157,14 +236,14 @@ func MetricsEventHandler() EventHandlerFunc {
 		//     taskFailed.WithLabelValues(event.TaskName).Inc()
 		// }
 
-		logger.Debug("📊 [Event] Metrics recorded",
-			zap.String("event_type", string(event.Type)),
-			zap.String("task_name", event.TaskName),
+		log.Debug("📊 [Event] Metrics recorded",
+			"event_type", string(event.Type),
+			"task_name", event.TaskName,
 		)
 	}
 }
 
-// AlertEventHandler 发送告警通知
+// AlertConfig 发送告警通知
 type AlertConfig struct {
 	Enabled    bool
 	OnErrors   bool
@@ -172,7 +251,7 @@ type AlertConfig struct {
 	MaxRetries int
 }
 
-func NewAlertEventHandler(config AlertConfig) EventHandlerFunc {
+func NewAlertEventHandler(config AlertConfig, log Logger) EventHandlerFunc {
 	return func(event *Event) {
 		if !config.Enabled {
 			return
@@ -205,11 +284,11 @@ func NewAlertEventHandler(config AlertConfig) EventHandlerFunc {
 		}
 
 		if shouldAlert {
-			logger.Warn("🚨 [Event] Alert triggered",
-				zap.String("task_name", event.TaskName),
-				zap.String("reason", reason),
-				zap.Time("timestamp", event.TimeStamp),
-				zap.Error(event.Error),
+			log.Warn("🚨 [Event] Alert triggered",
+				"task_name", event.TaskName,
+				"reason", reason,
+				"timestamp", event.TimeStamp,
+				event.Error,
 			)
 
 			// TODO: 这里可以集成实际的告警系统
@@ -221,31 +300,31 @@ func NewAlertEventHandler(config AlertConfig) EventHandlerFunc {
 	}
 }
 
-// HistoryEventHandler 记录任务历史
+// HistoryStorage 记录任务历史
 type HistoryStorage interface {
 	SaveEvent(event *Event) error
 }
 
-func NewHistoryEventHandler(storage HistoryStorage) EventHandlerFunc {
+func NewHistoryEventHandler(storage HistoryStorage, log Logger) EventHandlerFunc {
 	return func(event *Event) {
 		if err := storage.SaveEvent(event); err != nil {
-			logger.Error("❌ [Event] Failed to save event to history",
-				zap.Error(err),
-				zap.String("event_type", string(event.Type)),
-				zap.String("task_name", event.TaskName),
+			log.Error("❌ [Event] Failed to save event to history",
+				err,
+				"event_type", string(event.Type),
+				"task_name", event.TaskName,
 			)
 		}
 	}
 }
 
-// WebhookEventHandler 发送Webhook通知
+// WebhookConfig 发送Webhook通知
 type WebhookConfig struct {
 	Enabled bool
 	URLs    []string
 	Secret  string
 }
 
-func NewWebhookEventHandler(config WebhookConfig) EventHandlerFunc {
+func NewWebhookEventHandler(config WebhookConfig, log Logger) EventHandlerFunc {
 	return func(event *Event) {
 		if !config.Enabled || len(config.URLs) == 0 {
 			return
@@ -257,16 +336,34 @@ func NewWebhookEventHandler(config WebhookConfig) EventHandlerFunc {
 		// - 发送HTTP POST请求到所有URL
 		// - 处理重试
 
-		logger.Debug("🌐 [Event] Webhook would be sent",
-			zap.String("event_type", string(event.Type)),
-			zap.String("task_name", event.TaskName),
-			zap.Int("url_count", len(config.URLs)),
+		log.Debug("🌐 [Event] Webhook would be sent",
+			"event_type", string(event.Type),
+			"task_name", event.TaskName,
+			"url_count", len(config.URLs),
 		)
 	}
 }
 
+func DependencyMetEventHandler(scheduler *Scheduler, log Logger) EventHandlerFunc {
+	return func(event *Event) {
+		depTaskName := event.TaskName
+		stat, ok := scheduler.Stats.Get(depTaskName)
+		if !ok {
+			log.Errorf("🔔 [EventPush] Upstream task %s not found in stats!", depTaskName)
+			return
+		}
+
+		// 如果下游任务正处于等待上游的状态 (Waiting)，或者是纯事件触发的无时间任务 (Idle)
+		if stat.Status == Waiting || stat.Status == Idle {
+			log.Debugf("🔔 [EventPush] Upstream task %s finished! Pushing downstream task to queue: %s", depTaskName, depTaskName)
+			// 直接推给 Dispatcher 唤醒执行
+			scheduler.Dispatch(depTaskName)
+		}
+	}
+}
+
 // DependencyEventHandler 依赖事件处理器
-func DependencyEventHandler(dependencyManager *DependencyManager) EventHandlerFunc {
+func DependencyEventHandler(dependencyManager *DependencyManager, em *EventManager) EventHandlerFunc {
 	return func(event *Event) {
 		if event.Type == EventTypeAfterJob || event.Type == EventTypeJobError {
 			// 更新依赖状态
@@ -289,14 +386,13 @@ func DependencyEventHandler(dependencyManager *DependencyManager) EventHandlerFu
 						},
 					}
 
-					// 通过全局 EventManager 发射事件
-					if em := GetGlobalEventManager(); em != nil {
+					if em != nil {
 						em.Emit(dependencyEvent)
 					}
 
-					logger.Info("✅ [Event] Dependency satisfied",
-						zap.String("task", dep),
-						zap.String("dependency", event.TaskName),
+					em.logger.Info("✅ [Event] Dependency satisfied",
+						"task", dep,
+						"dependency", event.TaskName,
 					)
 				}
 			}

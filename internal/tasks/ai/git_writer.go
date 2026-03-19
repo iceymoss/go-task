@@ -17,9 +17,10 @@ import (
 	"time"
 
 	"github.com/iceymoss/go-task/internal/core"
-	"github.com/iceymoss/go-task/internal/tasks"
+	"github.com/iceymoss/go-task/internal/tasks/base_task"
+	"github.com/iceymoss/go-task/pkg/constants"
 	"github.com/iceymoss/go-task/pkg/db"
-	"github.com/iceymoss/go-task/pkg/db/objects"
+	"github.com/iceymoss/go-task/pkg/db/models"
 	"github.com/iceymoss/go-task/pkg/logger"
 
 	"github.com/tmc/langchaingo/llms"
@@ -28,23 +29,22 @@ import (
 )
 
 const (
-	TaskName = "ai:writer"
-	LastID   = TaskName + ":last_id"
+	aiWriterTaskName = "ai:writer"
+	LastID           = aiWriterTaskName + ":last_id"
 )
 
 // WriterTask AI 写作任务
-type WriterTask struct{}
-
-func init() {
-	tasks.Register(TaskName, NewWriterTask)
+type WriterTask struct {
+	base_task.BaseTask
 }
 
 func NewWriterTask() core.Task {
-	return &WriterTask{}
-}
-
-func (t *WriterTask) Identifier() string {
-	return TaskName
+	return &WriterTask{
+		BaseTask: base_task.BaseTask{
+			Name:     aiWriterTaskName,
+			TaskType: constants.TaskTypeYAML,
+		},
+	}
 }
 
 // WriterParams 参数结构体
@@ -68,10 +68,8 @@ func (t *WriterTask) Run(ctx context.Context, params map[string]any) error {
 		return fmt.Errorf("missing required params: api_key, remote_url, or ssh_key_path")
 	}
 
-	// 2. 随机延迟
-	if p.RandomDelay {
-		doRandomDelay(ctx)
-	}
+	// 随机延迟
+	doRandomDelay(ctx)
 
 	// 3. 准备工作目录
 	taskID := fmt.Sprintf("task_%d_%d", time.Now().Unix(), rand.Intn(1000))
@@ -93,7 +91,7 @@ func (t *WriterTask) Run(ctx context.Context, params map[string]any) error {
 	dbConn := db.GetMysqlConn(db.MYSQL_DB_GO_TASK)
 
 	// 自动迁移表结构 (为了方便，生产环境建议手动建表)
-	_ = dbConn.AutoMigrate(&objects.SysArticle{})
+	_ = dbConn.AutoMigrate(&models.SysArticle{})
 
 	// 没错从数据库中一篇文章来做,需要使用Redis来保存读取指针
 	var lastId string
@@ -108,7 +106,7 @@ func (t *WriterTask) Run(ctx context.Context, params map[string]any) error {
 		return fmt.Errorf("No last id found in redis")
 	}
 
-	article := &objects.SysArticle{}
+	article := &models.SysArticle{}
 	// id >= db.id 的一条，注意排序
 	err = dbConn.Model(article).Where("id > ?", lastId).Order("id ASC").First(article).Error
 	if err != nil {

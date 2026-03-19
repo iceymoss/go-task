@@ -2,15 +2,12 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
 	"sync"
 	"time"
-
-	"github.com/iceymoss/go-task/pkg/logger"
-
-	"go.uber.org/zap"
 )
 
 // RetryPolicy 重试策略
@@ -38,13 +35,29 @@ func DefaultRetryPolicy() *RetryPolicy {
 // RetryManager 重试管理器
 type RetryManager struct {
 	policies map[string]*RetryPolicy // 任务名 -> 重试策略
+	logger   Logger
+	em       *EventManager
 	mu       sync.RWMutex
 }
 
 // NewRetryManager 创建重试管理器
-func NewRetryManager() *RetryManager {
+func NewRetryManager(em *EventManager, log Logger) *RetryManager {
 	return &RetryManager{
 		policies: make(map[string]*RetryPolicy),
+		em:       em,
+		logger:   log,
+	}
+}
+
+// RetryManagerOption 重试管理器的配置项
+type RetryManagerOption func(*RetryManager)
+
+// WithRetryManagerLogger 配置重试管理器的日志实现
+func WithRetryManagerLogger(logger Logger) RetryManagerOption {
+	return func(rm *RetryManager) {
+		if logger != nil {
+			rm.logger = logger
+		}
 	}
 }
 
@@ -55,11 +68,11 @@ func (rm *RetryManager) SetPolicy(taskName string, policy *RetryPolicy) {
 
 	rm.policies[taskName] = policy
 
-	logger.Info("📋 [Retry] Set retry policy",
-		zap.String("task", taskName),
-		zap.Int("max_attempts", policy.MaxAttempts),
-		zap.Duration("initial_delay", policy.InitialDelay),
-		zap.Duration("max_delay", policy.MaxDelay),
+	rm.logger.Info("📋 [Retry] Set retry policy",
+		"task", taskName,
+		"max_attempts", policy.MaxAttempts,
+		"initial_delay", policy.InitialDelay,
+		"max_delay", policy.MaxDelay,
 	)
 }
 
@@ -87,7 +100,7 @@ func (rm *RetryManager) ShouldRetry(taskName string, attempt int, err error) boo
 	// 如果配置了可重试的错误列表，检查错误是否在列表中
 	if len(policy.RetryableErrors) > 0 {
 		for _, retryableErr := range policy.RetryableErrors {
-			if err == retryableErr {
+			if errors.Is(retryableErr, err) {
 				return true
 			}
 		}
@@ -144,16 +157,16 @@ func (rm *RetryManager) ExecuteWithRetry(taskName string, ctx context.Context, e
 		// 计算延迟
 		delay := rm.CalculateDelay(taskName, attempt)
 
-		logger.Warn("🔄 [Retry] Task failed, will retry",
-			zap.String("task", taskName),
-			zap.Int("attempt", attempt),
-			zap.Duration("delay", delay),
-			zap.Error(err),
+		rm.logger.Warn("🔄 [Retry] Task failed, will retry",
+			"task", taskName,
+			"attempt", attempt,
+			"delay", delay,
+			err,
 		)
 
 		// 发射重试事件
-		if eventManager := GetGlobalEventManager(); eventManager != nil {
-			eventManager.Emit(&Event{
+		if rm.em != nil {
+			rm.em.Emit(&Event{
 				Type:      EventTypeJobRetry,
 				TaskName:  taskName,
 				TimeStamp: time.Now(),
@@ -166,11 +179,13 @@ func (rm *RetryManager) ExecuteWithRetry(taskName string, ctx context.Context, e
 			})
 		}
 
-		// 等待
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			timer.Stop() // 如果 Context 提前取消，立即释放定时器内存
 			return ctx.Err()
-		case <-time.After(delay):
+		case <-timer.C:
+			// 正常等到了延迟时间，继续下一轮循环
 		}
 	}
 
@@ -241,23 +256,4 @@ func RetryWithPolicy(retryManager *RetryManager, taskName string) JobWrapper {
 			return retryManager.ExecuteWithRetry(taskName, ctx, next)
 		}
 	}
-}
-
-// ==================== 全局实例 ====================
-
-var (
-	globalEventManager *EventManager
-	eventManagerOnce   sync.Once
-)
-
-// SetGlobalEventManager 设置全局事件管理器
-func SetGlobalEventManager(em *EventManager) {
-	eventManagerOnce.Do(func() {
-		globalEventManager = em
-	})
-}
-
-// GetGlobalEventManager 获取全局事件管理器
-func GetGlobalEventManager() *EventManager {
-	return globalEventManager
 }

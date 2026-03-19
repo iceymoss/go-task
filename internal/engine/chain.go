@@ -3,13 +3,9 @@ package engine
 import (
 	"context"
 	"fmt"
-	"log"
 	"runtime/debug"
 	"sync/atomic"
 	"time"
-
-	"github.com/iceymoss/go-task/pkg/logger"
-	"go.uber.org/zap"
 )
 
 // JobFunc 任务函数类型
@@ -28,6 +24,8 @@ func (c Chain) Then(wrappers ...JobWrapper) Chain {
 
 // Apply 应用所有包装器到任务函数
 func (c Chain) Apply(job JobFunc) JobFunc {
+	// Chain中每一个元素都是一个返回JobWrapper类型的函数
+	// 所以这里就是将job这个函数增加chain中每一个函数的能力
 	for i := len(c) - 1; i >= 0; i-- {
 		job = c[i](job)
 	}
@@ -37,16 +35,13 @@ func (c Chain) Apply(job JobFunc) JobFunc {
 // ==================== 内置包装器 ====================
 
 // Recover 恢复panic，记录日志
-func Recover(logger *zap.Logger) JobWrapper {
+func Recover(logger Logger) JobWrapper {
 	return func(next JobFunc) JobFunc {
 		return func(ctx context.Context) error {
 			defer func() {
 				if r := recover(); r != nil {
 					stack := debug.Stack()
-					logger.Error("❌ [JobWrapper] Panic recovered",
-						zap.Any("panic", r),
-						zap.String("stack", string(stack)),
-					)
+					logger.Error("❌ [JobWrapper] Panic recovered", "panic", r, "stack", string(stack))
 				}
 			}()
 			return next(ctx)
@@ -55,7 +50,7 @@ func Recover(logger *zap.Logger) JobWrapper {
 }
 
 // DelayIfStillRunning 如果任务正在运行，则延迟执行
-func DelayIfStillRunning(logger *zap.Logger) JobWrapper {
+func DelayIfStillRunning(logger Logger) JobWrapper {
 	var running int32
 	return func(next JobFunc) JobFunc {
 		return func(ctx context.Context) error {
@@ -70,7 +65,7 @@ func DelayIfStillRunning(logger *zap.Logger) JobWrapper {
 }
 
 // SkipIfStillRunning 如果任务正在运行，则跳过执行
-func SkipIfStillRunning(logger *zap.Logger) JobWrapper {
+func SkipIfStillRunning(logger Logger) JobWrapper {
 	var running int32
 	return func(next JobFunc) JobFunc {
 		return func(ctx context.Context) error {
@@ -84,90 +79,59 @@ func SkipIfStillRunning(logger *zap.Logger) JobWrapper {
 	}
 }
 
-// Timeout 设置任务超时时间
+// Timeout 设置任务超时时间的包装器
 func Timeout(timeout time.Duration) JobWrapper {
 	return func(next JobFunc) JobFunc {
 		return func(ctx context.Context) error {
-			ctx, cancel := context.WithTimeout(ctx, timeout)
+			// 基于父 ctx 派生出一个带有超时的 context
+			timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+			// defer cancel() 极其重要：无论任务是成功完成还是超时，都要及时释放 Context 占用的底层资源
 			defer cancel()
 
+			// 创建一个接收错误的通道
+			// 容量必须设为 1
+			// 如果设为无缓冲通道 (make(chan error))，当触发超时退出后，如果实际任务在未来的某一天跑完了，
+			// 它往 done 里写数据时会因为没有人接收而永远阻塞，导致 Goroutine 永久泄漏！
 			done := make(chan error, 1)
+
+			// 开启一个后台协程去真正执行任务
 			go func() {
-				done <- next(ctx)
+				// 防止子协程崩溃带走整个系统
+				defer func() {
+					if r := recover(); r != nil {
+						done <- fmt.Errorf("panic in timeout goroutine: %v\n%s", r, debug.Stack())
+					}
+				}()
+				done <- next(timeoutCtx)
 			}()
 
+			// 使用 select 监听谁先到来
 			select {
 			case err := <-done:
+				// 任务在超时时间内顺利（或报错）跑完了
 				return err
-			case <-ctx.Done():
+			case <-timeoutCtx.Done():
+				// 时间到了，任务还没跑完。timeoutCtx.Done() 的通道会收到关闭信号
 				return fmt.Errorf("job timed out after %v", timeout)
 			}
 		}
 	}
 }
 
-// Retry 任务重试包装器
-func Retry(maxAttempts int, delay time.Duration, backoffMultiplier float64) JobWrapper {
-	return func(next JobFunc) JobFunc {
-		return func(ctx context.Context) error {
-			var lastErr error
-			currentDelay := delay
-
-			for attempt := 1; attempt <= maxAttempts; attempt++ {
-				err := next(ctx)
-				if err == nil {
-					return nil
-				}
-
-				lastErr = err
-				if attempt < maxAttempts {
-					logger.Info("🔄 [JobWrapper] Retrying job",
-						zap.Int("attempt", attempt),
-						zap.Int("max_attempts", maxAttempts),
-						zap.Duration("delay", currentDelay),
-						zap.Error(err),
-					)
-
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					case <-time.After(currentDelay):
-					}
-
-					// 指数退避
-					currentDelay = time.Duration(float64(currentDelay) * backoffMultiplier)
-				}
-			}
-
-			return fmt.Errorf("job failed after %d attempts, last error: %w", maxAttempts, lastErr)
-		}
-	}
-}
-
 // Logging 记录任务执行日志
-func Logging(taskName string) JobWrapper {
+func Logging(taskName string, logger Logger) JobWrapper {
 	return func(next JobFunc) JobFunc {
 		return func(ctx context.Context) error {
 			startTime := time.Now()
-			logger.Info("🚀 [JobWrapper] Job started",
-				zap.String("task", taskName),
-				zap.Time("start_time", startTime),
-			)
+			logger.Info("🚀 [JobWrapper] Job started", "task", taskName, "start_time", startTime)
 
 			err := next(ctx)
 
 			duration := time.Since(startTime)
 			if err != nil {
-				logger.Error("❌ [JobWrapper] Job failed",
-					zap.String("task", taskName),
-					zap.Duration("duration", duration),
-					zap.Error(err),
-				)
+				logger.Error("❌ [JobWrapper] Job failed", "task", taskName, "duration", duration, err)
 			} else {
-				logger.Info("✅ [JobWrapper] Job completed successfully",
-					zap.String("task", taskName),
-					zap.Duration("duration", duration),
-				)
+				logger.Info("✅ [JobWrapper] Job completed successfully", "task", taskName, "duration", duration)
 			}
 
 			return err
@@ -176,7 +140,7 @@ func Logging(taskName string) JobWrapper {
 }
 
 // Metrics 记录任务执行指标（用于后续集成Prometheus）
-func Metrics(taskName string) JobWrapper {
+func Metrics(taskName string, logger Logger) JobWrapper {
 	return func(next JobFunc) JobFunc {
 		return func(ctx context.Context) error {
 			startTime := time.Now()
@@ -193,9 +157,9 @@ func Metrics(taskName string) JobWrapper {
 
 			// 暂时记录到日志
 			if err != nil {
-				log.Printf("📊 [Metrics] Task %s failed after %v: %v", taskName, duration, err)
+				logger.Errorf("❌ [Metrics] Task %s failed after %v: %v", taskName, duration, err)
 			} else {
-				log.Printf("📊 [Metrics] Task %s completed in %v", taskName, duration)
+				logger.Infof("📊 [Metrics] Task %s completed in %v", taskName, duration)
 			}
 
 			return err
@@ -206,6 +170,7 @@ func Metrics(taskName string) JobWrapper {
 // RateLimiter 限流包装器
 type RateLimiter interface {
 	Allow() bool
+	Release()
 }
 
 // SimpleRateLimiter 简单的令牌桶限流器
@@ -223,7 +188,14 @@ func NewSimpleRateLimiter(maxConcurrent int) *SimpleRateLimiter {
 }
 
 func (r *SimpleRateLimiter) Allow() bool {
-	return atomic.AddInt32(&r.current, 1) <= r.maxConcurrent
+	// 先加 1
+	newVal := atomic.AddInt32(&r.current, 1)
+	if newVal <= r.maxConcurrent {
+		return true
+	}
+	// 如果超过了限制，必须减回去！
+	atomic.AddInt32(&r.current, -1)
+	return false
 }
 
 func (r *SimpleRateLimiter) Release() {
@@ -237,11 +209,8 @@ func RateLimit(limiter RateLimiter) JobWrapper {
 			if !limiter.Allow() {
 				return fmt.Errorf("rate limit exceeded")
 			}
-			defer func() {
-				if rl, ok := limiter.(*SimpleRateLimiter); ok {
-					rl.Release()
-				}
-			}()
+
+			defer limiter.Release()
 
 			return next(ctx)
 		}
@@ -253,40 +222,6 @@ type CircuitBreakerPolicy interface {
 	Allow() bool
 	RecordSuccess()
 	RecordFailure()
-}
-
-// SimpleCircuitBreaker 简单的熔断器
-type SimpleCircuitBreaker struct {
-	maxFailures  int
-	failureCount int32
-	state        int32 // 0: closed, 1: open, 2: half-open
-}
-
-func NewSimpleCircuitBreaker(maxFailures int) *SimpleCircuitBreaker {
-	return &SimpleCircuitBreaker{
-		maxFailures: maxFailures,
-		state:       0, // closed
-	}
-}
-
-func (cb *SimpleCircuitBreaker) Allow() bool {
-	if atomic.LoadInt32(&cb.state) == 1 {
-		return false // open
-	}
-	return true
-}
-
-func (cb *SimpleCircuitBreaker) RecordSuccess() {
-	atomic.StoreInt32(&cb.failureCount, 0)
-	if atomic.LoadInt32(&cb.state) == 2 {
-		atomic.StoreInt32(&cb.state, 0) // back to closed
-	}
-}
-
-func (cb *SimpleCircuitBreaker) RecordFailure() {
-	if atomic.AddInt32(&cb.failureCount, 1) >= int32(cb.maxFailures) {
-		atomic.StoreInt32(&cb.state, 1) // open
-	}
 }
 
 // CircuitBreaker 熔断器包装器
@@ -310,7 +245,7 @@ func CircuitBreaker(breaker CircuitBreakerPolicy) JobWrapper {
 }
 
 // Conditional 条件执行包装器
-func Conditional(predicate func() bool) JobWrapper {
+func Conditional(logger Logger, predicate func() bool) JobWrapper {
 	return func(next JobFunc) JobFunc {
 		return func(ctx context.Context) error {
 			if !predicate() {
@@ -318,20 +253,6 @@ func Conditional(predicate func() bool) JobWrapper {
 				return nil
 			}
 			return next(ctx)
-		}
-	}
-}
-
-// Async 异步执行包装器
-func Async() JobWrapper {
-	return func(next JobFunc) JobFunc {
-		return func(ctx context.Context) error {
-			go func() {
-				if err := next(ctx); err != nil {
-					logger.Error("❌ [JobWrapper] Async job failed", zap.Error(err))
-				}
-			}()
-			return nil
 		}
 	}
 }

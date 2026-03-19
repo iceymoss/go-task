@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>任务详情 - Go-Task 任务调度平台</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f4f6f8;
+            color: #333;
+        }
+
+        .header {
+            background: #fff;
+            padding: 16px 32px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            color: #333;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 24px;
+        }
+
+        .nav-links a {
+            color: #666;
+            text-decoration: none;
+            font-size: 14px;
+            transition: color 0.2s;
+        }
+
+        .nav-links a:hover,
+        .nav-links a.active {
+            color: #007bff;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .user-info span {
+            color: #666;
+        }
+
+        .logout-btn {
+            background: #dc3545;
+            color: #fff;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .logout-btn:hover {
+            background: #c82333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 32px auto;
+            padding: 0 32px;
+        }
+
+        .breadcrumb {
+            margin-bottom: 24px;
+            font-size: 14px;
+        }
+
+        .breadcrumb a {
+            color: #007bff;
+            text-decoration: none;
+        }
+
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+
+        .breadcrumb span {
+            color: #666;
+            margin: 0 8px;
+        }
+
+        .grid-container {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 24px;
+        }
+
+        @media (max-width: 1024px) {
+            .grid-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background: #fff;
+            padding: 24px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 24px;
+        }
+
+        .card h2 {
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #007bff;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+
+        .info-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .info-label {
+            font-size: 13px;
+            color: #666;
+            font-weight: 600;
+        }
+
+        .info-value {
+            font-size: 14px;
+            color: #333;
+        }
+
+        .info-value.status-enabled {
+            color: #28a745;
+            font-weight: 600;
+        }
+
+        .info-value.status-disabled {
+            color: #dc3545;
+            font-weight: 600;
+        }
+
+        .type-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            background: #e2e3e5;
+            color: #495057;
+        }
+
+        .cron-expr {
+            font-family: monospace;
+            background: #f8f9fa;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .tag {
+            display: inline-block;
+            padding: 2px 6px;
+            background: #e7f3ff;
+            color: #0056b3;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-right: 4px;
+            margin-bottom: 4px;
+        }
+
+        .params-box {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #007bff;
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: #fff;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: #fff;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: #fff;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .log-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .log-table th,
+        .log-table td {
+            text-align: left;
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .log-table th {
+            background-color: #f8f9fa;
+            color: #666;
+            font-weight: 600;
+        }
+
+        .log-status-success {
+            color: #28a745;
+            font-weight: 600;
+        }
+
+        .log-status-error {
+            color: #dc3545;
+            font-weight: 600;
+        }
+
+        .log-status-running {
+            color: #007bff;
+            font-weight: 600;
+        }
+
+        .log-duration {
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #999;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px 20px;
+            color: #666;
+        }
+
+        .stats-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+
+        .stats-card h3 {
+            font-size: 14px;
+            opacity: 0.9;
+            margin-bottom: 8px;
+        }
+
+        .stats-card .value {
+            font-size: 32px;
+            font-weight: bold;
+        }
+
+        .stats-grid {
+            display: grid;
+            gap: 16px;
+        }
+
+        .next-run {
+            background: #28a745;
+            color: #fff;
+            padding: 16px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .next-run h3 {
+            font-size: 14px;
+            opacity: 0.9;
+            margin-bottom: 8px;
+        }
+
+        .next-run .time {
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .log-detail {
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            background: #f8f9fa;
+            padding: 8px;
+            border-radius: 4px;
+            margin-top: 4px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 2px solid #eee;
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            color: #666;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            color: #007bff;
+        }
+
+        .tab.active {
+            color: #007bff;
+            border-bottom-color: #007bff;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 12px;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+
+        .pagination button {
+            padding: 6px 12px;
+            border: 1px solid #ddd;
+            background: #fff;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .pagination button:hover:not(:disabled) {
+            background: #f8f9fa;
+        }
+
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .pagination .page-info {
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚀 Go-Task 任务调度平台</h1>
+        <nav class="nav-links">
+            <a href="/index.html">仪表盘</a>
+            <a href="/jobs.html">任务管理</a>
+        </nav>
+        <div class="user-info">
+            <span id="welcomeMessage">欢迎, 加载中...</span>
+            <button class="logout-btn" onclick="logout()">退出登录</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- 面包屑 -->
+        <div class="breadcrumb">
+            <a href="/jobs.html">任务管理</a>
+            <span>></span>
+            <span id="breadcrumbJobName">任务详情</span>
+        </div>
+
+        <!-- 加载状态 -->
+        <div class="loading" id="loadingState">
+            加载中...
+        </div>
+
+        <!-- 主内容 -->
+        <div class="grid-container" id="mainContent" style="display: none;">
+            <!-- 左侧：任务信息 -->
+            <div class="left-column">
+                <!-- 任务基本信息 -->
+                <div class="card">
+                    <h2>任务信息</h2>
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <span class="info-label">任务名称</span>
+                            <span class="info-value" id="infoName">-</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">显示名称</span>
+                            <span class="info-value" id="infoDisplayName">-</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">任务类型</span>
+                            <span class="info-value"><span class="type-badge" id="infoType">-</span></span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Cron 表达式</span>
+                            <span class="info-value"><span class="cron-expr" id="infoCron">-</span></span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">状态</span>
+                            <span class="info-value" id="infoEnable">-</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">运行状态</span>
+                            <span class="info-value" id="infoStatus">-</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">优先级</span>
+                            <span class="info-value" id="infoPriority">-</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">超时时间</span>
+                            <span class="info-value" id="infoTimeout">-</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">最大重试次数</span>
+                            <span class="info-value" id="infoMaxRetries">-</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">上次运行</span>
+                            <span class="info-value" id="infoLastRun">-</span>
+                        </div>
+                    </div>
+
+                    <div class="info-item" style="margin-top: 20px;">
+                        <span class="info-label">描述</span>
+                        <span class="info-value" id="infoDescription" style="line-height: 1.6;">-</span>
+                    </div>
+
+                    <div class="info-item" style="margin-top: 16px;">
+                        <span class="info-label">标签</span>
+                        <span class="info-value" id="infoTags">-</span>
+                    </div>
+
+                    <div class="info-item" style="margin-top: 16px;">
+                        <span class="info-label">依赖任务</span>
+                        <span class="info-value" id="infoDependencies">-</span>
+                    </div>
+
+                    <div class="action-buttons" style="margin-top: 24px; padding-top: 20px; border-top: 1px solid #eee;">
+                        <button class="btn btn-success" id="btnEnable" onclick="toggleJob(true)">启用</button>
+                        <button class="btn btn-danger" id="btnDisable" onclick="toggleJob(false)">禁用</button>
+                        <button class="btn btn-primary" id="btnTest" onclick="testJob()">测试执行</button>
+                        <button class="btn btn-secondary" onclick="editJob()">编辑</button>
+                        <button class="btn btn-danger" onclick="deleteJob()">删除</button>
+                    </div>
+                </div>
+
+                <!-- 任务参数 -->
+                <div class="card">
+                    <h2>任务参数</h2>
+                    <div class="params-box" id="infoParams">-</div>
+                </div>
+            </div>
+
+            <!-- 右侧：统计和日志 -->
+            <div class="right-column">
+                <!-- 下次运行时间 -->
+                <div class="next-run">
+                    <h3>下次运行时间</h3>
+                    <div class="time" id="nextRunTime">-</div>
+                </div>
+
+                <!-- 统计信息 -->
+                <div class="stats-grid">
+                    <div class="stats-card">
+                        <h3>运行总次数</h3>
+                        <div class="value" id="statTotalRuns">0</div>
+                    </div>
+                    <div class="stats-card" style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%);">
+                        <h3>成功次数</h3>
+                        <div class="value" id="statSuccess">0</div>
+                    </div>
+                    <div class="stats-card" style="background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);">
+                        <h3>失败次数</h3>
+                        <div class="value" id="statError">0</div>
+                    </div>
+                    <div class="stats-card" style="background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);">
+                        <h3>平均耗时</h3>
+                        <div class="value" id="statAvgDuration">-</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 执行日志 -->
+        <div class="card" id="logsCard" style="display: none;">
+            <h2>执行日志</h2>
+            
+            <div class="tabs">
+                <div class="tab active" onclick="switchTab('recent')">最近执行</div>
+                <div class="tab" onclick="switchTab('all')">全部日志</div>
+            </div>
+
+            <div id="tab-recent" class="tab-content active">
+                <table class="log-table">
+                    <thead>
+                        <tr>
+                            <th>执行时间</th>
+                            <th>状态</th>
+                            <th>耗时</th>
+                            <th>结果</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recentLogsList">
+                        <tr><td colspan="4" class="empty-state">暂无日志</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="tab-all" class="tab-content">
+                <table class="log-table">
+                    <thead>
+                        <tr>
+                            <th>执行时间</th>
+                            <th>状态</th>
+                            <th>耗时</th>
+                            <th>结果</th>
+                        </tr>
+                    </thead>
+                    <tbody id="allLogsList">
+                        <tr><td colspan="4" class="empty-state">暂无日志</td></tr>
+                    </tbody>
+                </table>
+
+                <div class="pagination" id="logPagination" style="display: none;">
+                    <button onclick="prevLogPage()" id="prevLogBtn">上一页</button>
+                    <span class="page-info" id="logPageInfo">第 1 页</span>
+                    <button onclick="nextLogPage()" id="nextLogBtn">下一页</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let jobId = null;
+        let jobData = null;
+        let currentTab = 'recent';
+        let currentLogPage = 1;
+        const logPageSize = 10;
+        let allLogs = [];
+
+        // 检查是否已登录
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = '/login.html';
+        }
+
+        // 获取 URL 参数
+        const urlParams = new URLSearchParams(window.location.search);
+        jobId = urlParams.get('id');
+
+        if (!jobId) {
+            alert('缺少任务 ID');
+            window.location.href = '/jobs.html';
+        }
+
+        // 显示用户信息
+        function loadUserInfo() {
+            const user = JSON.parse(localStorage.getItem('user') || '{}');
+            document.getElementById('welcomeMessage').textContent = `欢迎, ${user.username || '用户'}`;
+        }
+
+        // 登出
+        function logout() {
+            const token = localStorage.getItem('token');
+            if (token) {
+                fetch('/api/auth/logout', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                }).catch(() => { });
+            }
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            window.location.href = '/login.html';
+        }
+
+        // API 请求包装器
+        async function apiRequest(url, options = {}) {
+            const token = localStorage.getItem('token');
+            const defaultOptions = {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                }
+            };
+            const response = await fetch(url, { ...defaultOptions, ...options });
+
+            if (response.status === 401) {
+                logout();
+                throw new Error('未授权');
+            }
+
+            return response;
+        }
+
+        // 加载任务详情
+        async function loadJobDetail() {
+            try {
+                const response = await apiRequest(`/api/jobs/${jobId}`);
+                const result = await response.json();
+                jobData = result.data;
+
+                if (!jobData) {
+                    alert('任务不存在');
+                    window.location.href = '/jobs.html';
+                    return;
+                }
+
+                // 更新页面内容
+                document.getElementById('loadingState').style.display = 'none';
+                document.getElementById('mainContent').style.display = 'grid';
+                document.getElementById('logsCard').style.display = 'block';
+
+                updateJobInfo();
+                loadLogs();
+                calculateStats();
+            } catch (error) {
+                console.error('加载任务详情失败:', error);
+                document.getElementById('loadingState').innerHTML = `
+                    <div class="empty-state">
+                        <h3>加载失败</h3>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        // 更新任务信息
+        function updateJobInfo() {
+            document.getElementById('breadcrumbJobName').textContent = jobData.display_name;
+            document.getElementById('infoName').textContent = jobData.name;
+            document.getElementById('infoDisplayName').textContent = jobData.display_name;
+            document.getElementById('infoType').textContent = jobData.type.toUpperCase();
+            document.getElementById('infoCron').textContent = jobData.cron_expr;
+            
+            const enableEl = document.getElementById('infoEnable');
+            enableEl.textContent = jobData.enable ? '已启用' : '已禁用';
+            enableEl.className = 'info-value ' + (jobData.enable ? 'status-enabled' : 'status-disabled');
+
+            document.getElementById('infoStatus').textContent = jobData.status || 'Idle';
+            document.getElementById('infoPriority').textContent = jobData.priority;
+            document.getElementById('infoTimeout').textContent = jobData.timeout + ' 秒';
+            document.getElementById('infoMaxRetries').textContent = jobData.max_retries;
+            document.getElementById('infoLastRun').textContent = jobData.last_run_at 
+                ? new Date(jobData.last_run_at).toLocaleString('zh-CN') 
+                : '-';
+            document.getElementById('infoDescription').textContent = jobData.description || '暂无描述';
+
+            // 标签
+            const tags = jobData.tags || [];
+            document.getElementById('infoTags').innerHTML = tags.length > 0
+                ? tags.map(t => `<span class="tag">${t}</span>`).join('')
+                : '<span class="info-value">无</span>';
+
+            // 依赖任务
+            const deps = jobData.dependencies || [];
+            document.getElementById('infoDependencies').textContent = deps.length > 0
+                ? deps.join(', ')
+                : '无';
+
+            // 参数
+            document.getElementById('infoParams').textContent = JSON.stringify(jobData.params, null, 2);
+
+            // 更新按钮状态
+            document.getElementById('btnEnable').style.display = jobData.enable ? 'none' : 'inline-block';
+            document.getElementById('btnDisable').style.display = jobData.enable ? 'inline-block' : 'none';
+
+            // 计算下次运行时间
+            calculateNextRun();
+        }
+
+        // 计算下次运行时间
+        function calculateNextRun() {
+            // 简化处理，实际应该使用 cron 库计算
+            if (jobData.enable) {
+                document.getElementById('nextRunTime').textContent = '计算中...';
+                // 这里可以调用 API 获取下次运行时间
+                validateCronAndGetNext();
+            } else {
+                document.getElementById('nextRunTime').textContent = '任务已禁用';
+            }
+        }
+
+        // 验证 Cron 并获取下次运行时间
+        async function validateCronAndGetNext() {
+            try {
+                const response = await apiRequest('/api/jobs/validate-cron', {
+                    method: 'POST',
+                    body: JSON.stringify({ cron_expr: jobData.cron_expr })
+                });
+
+                const result = await response.json();
+                if (result.valid && result.next_runs && result.next_runs.length > 0) {
+                    document.getElementById('nextRunTime').textContent = result.next_runs[0];
+                } else {
+                    document.getElementById('nextRunTime').textContent = '无法计算';
+                }
+            } catch (error) {
+                console.error('计算下次运行时间失败:', error);
+                document.getElementById('nextRunTime').textContent = '计算失败';
+            }
+        }
+
+        // 加载执行日志
+        async function loadLogs() {
+            try {
+                const response = await apiRequest(`/api/jobs/${jobId}/logs?limit=100`);
+                const result = await response.json();
+                allLogs = result.data || [];
+
+                renderRecentLogs();
+                renderAllLogs();
+            } catch (error) {
+                console.error('加载日志失败:', error);
+                document.getElementById('recentLogsList').innerHTML = `
+                    <tr><td colspan="4" class="empty-state">加载失败</td></tr>
+                `;
+            }
+        }
+
+        // 渲染最近日志
+        function renderRecentLogs() {
+            const recentLogs = allLogs.slice(0, 5);
+
+            if (recentLogs.length === 0) {
+                document.getElementById('recentLogsList').innerHTML = `
+                    <tr><td colspan="4" class="empty-state">暂无日志</td></tr>
+                `;
+                return;
+            }
+
+            const html = recentLogs.map(log => `
+                <tr>
+                    <td>${new Date(log.start_time).toLocaleString('zh-CN')}</td>
+                    <td class="log-status-${log.status.toLowerCase()}">${log.status}</td>
+                    <td class="log-duration">${log.duration ? log.duration + 'ms' : '-'}</td>
+                    <td>
+                        ${log.result || '-'}
+                        ${log.error_message ? `<div class="log-detail">${log.error_message}</div>` : ''}
+                    </td>
+                </tr>
+            `).join('');
+
+            document.getElementById('recentLogsList').innerHTML = html;
+        }
+
+        // 渲染全部日志
+        function renderAllLogs() {
+            const start = (currentLogPage - 1) * logPageSize;
+            const end = start + logPageSize;
+            const pageLogs = allLogs.slice(start, end);
+
+            if (pageLogs.length === 0) {
+                document.getElementById('allLogsList').innerHTML = `
+                    <tr><td colspan="4" class="empty-state">暂无日志</td></tr>
+                `;
+                document.getElementById('logPagination').style.display = 'none';
+                return;
+            }
+
+            const html = pageLogs.map(log => `
+                <tr>
+                    <td>${new Date(log.start_time).toLocaleString('zh-CN')}</td>
+                    <td class="log-status-${log.status.toLowerCase()}">${log.status}</td>
+                    <td class="log-duration">${log.duration ? log.duration + 'ms' : '-'}</td>
+                    <td>
+                        ${log.result || '-'}
+                        ${log.error_message ? `<div class="log-detail">${log.error_message}</div>` : ''}
+                    </td>
+                </tr>
+            `).join('');
+
+            document.getElementById('allLogsList').innerHTML = html;
+
+            // 更新分页
+            const totalPages = Math.ceil(allLogs.length / logPageSize);
+            document.getElementById('logPagination').style.display = totalPages > 1 ? 'flex' : 'none';
+            document.getElementById('logPageInfo').textContent = `第 ${currentLogPage} / ${totalPages || 1} 页`;
+            document.getElementById('prevLogBtn').disabled = currentLogPage === 1;
+            document.getElementById('nextLogBtn').disabled = currentLogPage >= totalPages;
+        }
+
+        // 日志分页
+        function prevLogPage() {
+            if (currentLogPage > 1) {
+                currentLogPage--;
+                renderAllLogs();
+            }
+        }
+
+        function nextLogPage() {
+            const totalPages = Math.ceil(allLogs.length / logPageSize);
+            if (currentLogPage < totalPages) {
+                currentLogPage++;
+                renderAllLogs();
+            }
+        }
+
+        // 计算统计信息
+        function calculateStats() {
+            const totalRuns = allLogs.length;
+            const successCount = allLogs.filter(l => l.status === 'Success').length;
+            const errorCount = allLogs.filter(l => l.status === 'Error').length;
+
+            document.getElementById('statTotalRuns').textContent = totalRuns;
+            document.getElementById('statSuccess').textContent = successCount;
+            document.getElementById('statError').textContent = errorCount;
+
+            // 计算平均耗时
+            const logsWithDuration = allLogs.filter(l => l.duration && l.duration > 0);
+            if (logsWithDuration.length > 0) {
+                const totalDuration = logsWithDuration.reduce((sum, l) => sum + l.duration, 0);
+                const avgDuration = Math.round(totalDuration / logsWithDuration.length);
+                document.getElementById('statAvgDuration').textContent = avgDuration + 'ms';
+            } else {
+                document.getElementById('statAvgDuration').textContent = '-';
+            }
+        }
+
+        // 切换标签页
+        function switchTab(tab) {
+            currentTab = tab;
+
+            // 更新标签样式
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+
+            // 更新内容显示
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.getElementById('tab-' + tab).classList.add('active');
+        }
+
+        // 启用/禁用任务
+        async function toggleJob(enable) {
+            try {
+                const action = enable ? 'enable' : 'disable';
+                const response = await apiRequest(`/api/jobs/${jobId}/${action}`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    alert(enable ? '启用成功' : '禁用成功');
+                    loadJobDetail();
+                } else {
+                    const error = await response.json();
+                    alert('操作失败: ' + (error.error || '未知错误'));
+                }
+            } catch (error) {
+                console.error('切换状态失败:', error);
+                alert('操作失败: ' + error.message);
+            }
+        }
+
+        // 测试任务
+        async function testJob() {
+            if (!confirm('确定要测试执行这个任务吗？')) return;
+
+            try {
+                const response = await apiRequest(`/api/jobs/${jobId}/test`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    alert('测试任务已启动，请查看日志');
+                    setTimeout(() => {
+                        loadJobDetail();
+                    }, 2000);
+                } else {
+                    const error = await response.json();
+                    alert('启动测试失败: ' + (error.error || '未知错误'));
+                }
+            } catch (error) {
+                console.error('测试任务失败:', error);
+                alert('测试任务失败: ' + error.message);
+            }
+        }
+
+        // 编辑任务
+        function editJob() {
+            window.location.href = `/jobs.html`;
+            // 这里可以优化为直接打开编辑模态框
+        }
+
+        // 删除任务
+        async function deleteJob() {
+            if (!confirm('确定要删除这个任务吗？')) return;
+
+            try {
+                const response = await apiRequest(`/api/jobs/${jobId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert('删除成功');
+                    window.location.href = '/jobs.html';
+                } else {
+                    const error = await response.json();
+                    alert('删除失败: ' + (error.error || '未知错误'));
+                }
+            } catch (error) {
+                console.error('删除任务失败:', error);
+                alert('删除任务失败: ' + error.message);
+            }
+        }
+
+        // 初始化
+        loadUserInfo();
+        loadJobDetail();
+
+        // 每30秒刷新数据
+        setInterval(() => {
+            if (jobId) {
+                loadJobDetail();
+            }
+        }, 30000);
+    </script>
+</body>
+</html>

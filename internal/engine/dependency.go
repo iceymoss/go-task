@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"sync"
 	"time"
-
-	"github.com/iceymoss/go-task/pkg/logger"
-	"go.uber.org/zap"
 )
 
 var (
@@ -19,42 +16,56 @@ var (
 type DependencyType int
 
 const (
-	DependencyTypeAllSuccess DependencyType = iota // 所有依赖都成功后执行
-	DependencyTypeAnySuccess                       // 任一依赖成功后执行
-	DependencyTypeAllComplete                      // 所有依赖完成后执行（无论成功失败）
+	DependencyTypeAllSuccess  DependencyType = iota // 所有依赖都成功后执行
+	DependencyTypeAnySuccess                        // 任一依赖成功后执行
+	DependencyTypeAllComplete                       // 所有依赖完成后执行（无论成功失败）
 )
 
 // DependencyRule 任务依赖规则
 type DependencyRule struct {
-	TaskName        string         // 当前任务名称
-	DependsOn       []string       // 依赖的任务名称列表
-	DependencyType  DependencyType // 依赖类型
-	Timeout         time.Duration  // 等待依赖完成的超时时间
-	CheckInterval   time.Duration  // 检查依赖状态的间隔
+	TaskName       string         // 当前任务名称
+	DependsOn      []string       // 依赖的任务名称列表
+	DependencyType DependencyType // 依赖类型
+	Timeout        time.Duration  // 等待依赖完成的超时时间
+	CheckInterval  time.Duration  // 检查依赖状态的间隔
 }
 
 // DependencyManager 依赖管理器
 type DependencyManager struct {
 	dependencies map[string]*DependencyRule // 任务名 -> 依赖规则
-	taskStatus   map[string]TaskStatus     // 任务名 -> 任务状态
+	taskStatus   map[string]TaskStatus      // 任务名 -> 任务状态
 	graph        map[string][]string        // 任务依赖图（用于检测循环依赖）
+	logger       Logger
 	mu           sync.RWMutex
 }
 
 // TaskStatus 任务依赖状态
 type TaskStatus struct {
-	Completed bool
-	Success   bool
-	FinishedAt time.Time
-	Error     error
+	Completed  bool      //  是否完成
+	Success    bool      //  是否成功
+	FinishedAt time.Time //  完成时间
+	Error      error     //  错误信息
+}
+
+// DependencyOption 定义依赖管理器的配置项
+type DependencyOption func(*DependencyManager)
+
+// WithDependencyLogger 配置依赖管理器的日志实现
+func WithDependencyLogger(logger Logger) DependencyOption {
+	return func(dm *DependencyManager) {
+		if logger != nil {
+			dm.logger = logger
+		}
+	}
 }
 
 // NewDependencyManager 创建依赖管理器
-func NewDependencyManager() *DependencyManager {
+func NewDependencyManager(logger Logger) *DependencyManager {
 	return &DependencyManager{
 		dependencies: make(map[string]*DependencyRule),
 		taskStatus:   make(map[string]TaskStatus),
 		graph:        make(map[string][]string),
+		logger:       logger,
 	}
 }
 
@@ -80,10 +91,10 @@ func (dm *DependencyManager) AddDependency(rule *DependencyRule) error {
 		Success:   false,
 	}
 
-	logger.Info("✅ [Dependency] Added dependency",
-		zap.String("task", rule.TaskName),
-		zap.Strings("depends_on", rule.DependsOn),
-		zap.String("type", dm.dependencyTypeToString(rule.DependencyType)),
+	dm.logger.Info("✅ [Dependency] Added dependency",
+		"task", rule.TaskName,
+		"depends_on", rule.DependsOn,
+		"type", dm.dependencyTypeToString(rule.DependencyType),
 	)
 
 	return nil
@@ -194,16 +205,16 @@ func (dm *DependencyManager) UpdateTaskStatus(taskName string, success bool, err
 	defer dm.mu.Unlock()
 
 	dm.taskStatus[taskName] = TaskStatus{
-		Completed: true,
-		Success:   success,
+		Completed:  true,
+		Success:    success,
 		FinishedAt: time.Now(),
-		Error:     err,
+		Error:      err,
 	}
 
-	logger.Info("📊 [Dependency] Updated task status",
-		zap.String("task", taskName),
-		zap.Bool("success", success),
-		zap.Time("finished_at", time.Now()),
+	dm.logger.Info("📊 [Dependency] Updated task status",
+		"task", taskName,
+		"success", success,
+		"finished_at", time.Now(),
 	)
 }
 
@@ -221,7 +232,7 @@ func (dm *DependencyManager) GetDependencyChain(taskName string) ([]string, erro
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
 
-	chain := []string{}
+	var chain []string
 	visited := make(map[string]bool)
 
 	dm.buildDependencyChain(taskName, visited, &chain)
@@ -243,41 +254,6 @@ func (dm *DependencyManager) buildDependencyChain(taskName string, visited map[s
 	}
 
 	*chain = append(*chain, taskName)
-}
-
-// WaitForDependencies 等待依赖任务完成
-func (dm *DependencyManager) WaitForDependencies(taskName string) error {
-	rule, exists := dm.GetDependencyRule(taskName)
-	if !exists || len(rule.DependsOn) == 0 {
-		return nil
-	}
-
-	if rule.CheckInterval == 0 {
-		rule.CheckInterval = 5 * time.Second
-	}
-
-	if rule.Timeout == 0 {
-		rule.Timeout = 30 * time.Minute
-	}
-
-	timeout := time.After(rule.Timeout)
-	ticker := time.NewTicker(rule.CheckInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-timeout:
-			return fmt.Errorf("timeout waiting for dependencies of task %s", taskName)
-		case <-ticker.C:
-			satisfied, err := dm.CheckDependencies(taskName)
-			if err != nil {
-				return err
-			}
-			if satisfied {
-				return nil
-			}
-		}
-	}
 }
 
 // GetDependentTasks 获取依赖于指定任务的所有任务
