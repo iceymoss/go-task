@@ -8,16 +8,10 @@ import (
 	"github.com/iceymoss/go-task/pkg/logger"
 	"github.com/iceymoss/go-task/web"
 
-	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 )
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		logger.Fatal("❌ .env error", zap.Error(err))
-	}
-
 	cfg, err := conf.LoadConfig("configs/config.yaml")
 	if err != nil {
 		logger.Fatal("❌ LoadConfig error", zap.Error(err))

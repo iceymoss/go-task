@@ -362,25 +362,21 @@ func parseParams(params map[string]any) WriterParams {
 }
 
 func doRandomDelay(ctx context.Context) {
-	// 注意：如果是 Go 1.20 之前的版本，rand.Seed 最好放在 main() 或 init() 中全局执行一次，
-	// 不要放在函数内部，否则高并发下可能导致生成的随机数重复。
-	// Go 1.20+ 已经不需要手动 Seed 了。
-	rand.Seed(time.Now().UnixNano())
-
-	// 生成 0 到 600 之间的随机整数 (包含 0，包含 600)
-	// 10小时 * 60分钟 = 600分钟
-	minutes := rand.Intn(4)
-
+	// 生成 0 到 500 之间的随机整数 (包含 0 和 500)
+	minutes := rand.Intn(501)
 	delay := time.Duration(minutes) * time.Minute
 
-	// 为了方便看日志，我增加了一个显示小时数的转换
-	log.Printf("💤 [AI Task] Sleeping for %d minutes (approx %.1f hours)...", minutes, float64(minutes)/60.0)
+	log.Printf("💤 [doRandomDelay] Sleeping for %d minutes (approx %.1f hours)...", minutes, float64(minutes)/60.0)
+
+	// 使用 time.NewTimer 替代 time.After，避免 timer 泄漏
+	timer := time.NewTimer(delay)
+	defer timer.Stop() // 确保函数退出时，无论因为什么原因，都清理掉 timer
 
 	select {
-	case <-time.After(delay):
-		log.Println("⏰ [AI Task] Waking up...")
+	case <-timer.C:
+		log.Println("⏰ [doRandomDelay] Waking up...")
 	case <-ctx.Done():
-		log.Println("⚠️ [AI Task] Context cancelled")
+		log.Println("⚠️ [doRandomDelay] Context cancelled")
 	}
 }
 
